@@ -1,0 +1,29 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "2.02",
+	"FriendlyName": "SixDOF",
+	"Description": "",
+	"Category": "Gameplay",
+	"CreatedBy": "Mookie",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/content/f0817678d9c5456da50ff829551a21e9",
+	"SupportURL": "mookiexl@gmail.com",
+	"EngineVersion": "{87203396-4EFA-360C-5585-F089BAEF46D3}",
+	"CanContainContent": false,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "SixDOFMovement",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Linux",
+				"Mac",
+				"Android"
+			]
+		}
+	]
+}
