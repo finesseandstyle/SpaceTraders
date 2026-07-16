@@ -78,6 +78,7 @@ Intermediate/*
 Plugins/**/Intermediate/*
 Plugins/**/Binaries/*
 Plugins/DLSS
+Plugins/StreamlineNGXCommon
 Plugins/Developer/RiderLink/*
 
 # Cache files for the editor to use
