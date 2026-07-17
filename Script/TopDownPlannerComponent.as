@@ -3,7 +3,10 @@ enum EInteractionResult {
         Invalid,
         OnActor,
         OnPlayfield,
-        OnSelf
+        OnSelf,
+        OnPlanet,
+        OnStation,
+        OnLoot
 }
 
 enum EPathingClickType {
@@ -33,6 +36,7 @@ class UTopDownPlannerComponent : UActorComponent
     UPROPERTY() AActor HoveredObject;
 
     UPROPERTY() AActor PlayerShip;
+    UPROPERTY() UTurnBasedMovementComponent MoveComp;
 
     UPROPERTY() TArray<AActor> ActorsToIgnore; //Playfield and any helper actors that should not obstruct hovering
     UPROPERTY() TArray<AActor> Stars;
@@ -44,8 +48,13 @@ class UTopDownPlannerComponent : UActorComponent
     UPROPERTY() UNiagaraComponent HoveredPath;
 
     UPROPERTY() UNiagaraSystem PathTemplate;
+
+    UPROPERTY() ETurnMovementType MovementType = ETurnMovementType::Fly;
+    UPROPERTY() AActor LandingObject;
+    UPROPERTY() ATurnMarker TurnMarker;
     //UPROPERTY() AActor smthelse
     private bool bHasResult;
+    private FTimerHandle HidePathHandle;
 
     private FCollisionQueryParams Params;
 
@@ -60,11 +69,8 @@ class UTopDownPlannerComponent : UActorComponent
             Params.AddIgnoredActor(Actor);
         }
         //SetTickGroup(ETickingGroup::TG_PostPhysics);
-        //
-        if (PathTemplate != nullptr)
-        {
-            PlayerPath = Niagara::SpawnSystemAtLocation(PathTemplate, FVector(3000, 2000, 1100));
-        }
+        TurnMarker.SetActorHiddenInGame(true);
+        MoveComp = PlayerShip.GetComponentByClass(UTurnBasedMovementComponent);
     }
 
     UFUNCTION(BlueprintOverride)
@@ -92,7 +98,6 @@ class UTopDownPlannerComponent : UActorComponent
     UFUNCTION()
     void GoToLocation(FVector DestinationLocation)
     {
-        UTurnBasedMovementComponent MoveComp = PlayerShip.GetComponentByClass(UTurnBasedMovementComponent);
         FVector AdjustedLocation;
         int Distance, Days;
         if (Cast<ATopDown_GameState>(Gameplay::GetGameState()).bIsGamePaused)
@@ -101,18 +106,14 @@ class UTopDownPlannerComponent : UActorComponent
             {
                 if (MoveComp.SetNewWaypoint(DestinationLocation, AdjustedLocation, Distance, Days))
                 {
-                    //Update Path Marker and Draw the Path
-                    DrawPath(MoveComp);
-                    Print("Add Waypoint");
+                    DrawPath(MoveComp, AdjustedLocation, Distance, Days);
                 }
             }
             else 
             {
                 if (MoveComp.SetPath(DestinationLocation, AdjustedLocation, Distance, Days))
                 {
-                    //Update Path Marker and Draw the Path, Show Path
-                    DrawPath(MoveComp);
-                    Print("New Path");
+                    DrawPath(MoveComp, AdjustedLocation, Distance, Days);
                 }
             }
         }
@@ -124,16 +125,13 @@ class UTopDownPlannerComponent : UActorComponent
                 {
                     if (MoveComp.QueuePathMidTurn(DestinationLocation, AdjustedLocation, Distance, Days))
                     {
-                        //Update Path Marker Redraw path
-                        DrawPath(MoveComp);
-                        Print("Queue path mid turn");
+                        DrawPath(MoveComp, AdjustedLocation, Distance, Days, Duration=1);
                     }
                 }
                 else
                 {
-                    //Update Path Marker Redraw path
-                    DrawPath(MoveComp);
-                    Print("Cancel Path Queueing");
+                    MoveComp.CancelPathQueueing(AdjustedLocation, Distance, Days);
+                    DrawPath(MoveComp, AdjustedLocation, Distance, Days);
                 }
             }
             else 
@@ -142,20 +140,12 @@ class UTopDownPlannerComponent : UActorComponent
                 {
                     if (MoveComp.QueuePathMidTurn(DestinationLocation, AdjustedLocation, Distance, Days))
                     {
-                        //Update Path Marker Redraw path
-                        DrawPath(MoveComp);
-                        Print("Queue path mid turn");
+                        DrawPath(MoveComp, AdjustedLocation, Distance, Days, Duration=1);
                     }
                 }
                 else 
                 {
-                    MoveComp.CancelPath();
-                    //Hide path
-                    if (PlayerPath != nullptr)
-                    {
-                        DestroyComponent(PlayerPath);
-                    }
-                    Print("Cancel Path");
+                    CancelPath();
                 }
             }
 
@@ -164,23 +154,24 @@ class UTopDownPlannerComponent : UActorComponent
 
     UFUNCTION()
     void CancelPath()
-    {        
-        UTurnBasedMovementComponent MoveComp = PlayerShip.GetComponentByClass(UTurnBasedMovementComponent);
+    {
         MoveComp.CancelPath();
-        if (PlayerPath != nullptr)
-        {
-            PlayerPath.DestroyComponent();
-        }
+        HidePath();
         //Hide Path
     }
 
+    //Duration -1 means we draw forever until there's a change
     UFUNCTION()
-    void DrawPath(UTurnBasedMovementComponent MoveComp, bool UsePlayerPath=true)
+    void DrawPath(UTurnBasedMovementComponent MovementComponent, FVector AdjustedLocation, int Distance, int Days, bool UsePlayerPath=true, float Duration=-1)
     {
         if (UsePlayerPath)
         {
+            TurnMarker.SetActorHiddenInGame(false);
+            TurnMarker.SetLandingState(MovementType);
+            TurnMarker.UpdateTurnMarker(AdjustedLocation, Distance, Days);
+
             TArray<FVector> CurrentPath, RemainingPath, TraversedPath, Checkpoints, ShadowPath1, ShadowPath2;
-            UPathingUtils::GetPathSamples(MoveComp.PathSpline, MoveComp.CheckpointDistances, MoveComp.StartDistance, 
+            UPathingUtils::GetPathSamples(MovementComponent.PathSpline, MovementComponent.CheckpointDistances, MovementComponent.StartDistance, 
             CurrentPath, RemainingPath, TraversedPath, Checkpoints, 75, 0);
             if (PlayerPath != nullptr)
             {
@@ -201,7 +192,7 @@ class UTopDownPlannerComponent : UActorComponent
             NiagaraDataInterfaceArray::SetNiagaraArrayVector(PlayerPath, n"ShadowPositions", ShadowPath1);
             NiagaraDataInterfaceArray::SetNiagaraArrayVector(PlayerPath, n"ShadowPositionsRemaining", ShadowPath2);
 
-            if (MoveComp.CheckpointDistances.Num() > 2)
+            if (MovementComponent.CheckpointDistances.Num() > 2)
             {
                 PlayerPath.SetFloatParameter(n"HostileOpacityRemaining", 0.0);
             }
@@ -209,8 +200,39 @@ class UTopDownPlannerComponent : UActorComponent
             {
                 PlayerPath.SetFloatParameter(n"HostileOpacityCurrent", 0.0);    
             }
+
+            if (Duration == -1)
+            {
+                System::ClearAndInvalidateTimerHandle(HidePathHandle);
+            } 
+            else 
+            {
+                HidePathHandle = System::SetTimer(this, n"HidePath", Duration, false);
+            }
+
             //PlayerPath.SetFloatParameter(n"CurrentPathOpacity", 0.7);    
             //PlayerPath.SetFloatParameter(n"RemainingPathOpacity", 0.4);    
         }
+    }
+
+    UFUNCTION(BlueprintPure)
+    bool GetPathDrawParams(UTurnBasedMovementComponent&out MovementComp, FVector&out PathEndLocation, int&out Distance, int&out Days)
+    {
+        MovementComp = PlayerShip.GetComponentByClass(UTurnBasedMovementComponent);
+        Distance = MovementComp.GetPathDistance();
+        PathEndLocation = MovementComp.PathSpline.GetLocationAtDistanceAlongSpline(MovementComp.PathSpline.SplineLength, ESplineCoordinateSpace::World);
+        Days = MovementComp.PathDurationInTurns();
+
+        return Distance > 1;
+    }
+
+    UFUNCTION()
+    void HidePath()
+    {
+        if (PlayerPath != nullptr)
+        {
+            PlayerPath.DestroyComponent();
+        }
+        TurnMarker.SetActorHiddenInGame(true);
     }
 }

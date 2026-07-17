@@ -1,5 +1,6 @@
 event void FOnMovementComplete2();
 event void FOnPenaltyApplied2(float PenaltyDuration, float NewEndDistance);
+event void FOnShipRotated(FVector DestinationLocation);
 
 /**
  * Drives an actor along a USplineComponent over a fixed duration, guaranteeing
@@ -40,11 +41,19 @@ enum EShipMovementState
     StoppedForPickup
 }
 
+struct FWaypointTriggerTime
+{
+    int32 SplinePointIndex;
+    float NormalizedTime; // [0, 1] within this turn
+    float ActualTimeSeconds; // Scaled to your turn's actual duration
+}
+
 UCLASS()
 class UTurnBasedMovementComponent : UActorComponent
 {
     UPROPERTY() FOnMovementComplete2 OnMovementComplete;
     UPROPERTY() FOnPenaltyApplied2 OnPenaltyApplied;
+    UPROPERTY() FOnShipRotated OnShipRotated;
 
     UPROPERTY() TArray<float32> CheckpointDistances;
     UPROPERTY() float CurrentSpeed = 5000.0;
@@ -61,6 +70,8 @@ class UTurnBasedMovementComponent : UActorComponent
     UPROPERTY() EShipMovementState MovementState; //TODO: this replaces bIsMoving, bCurveReady, bStopepdForPickup, bPickupEasingOut
 
     private UCurveFloat MovementCurve; // normTime [0,1] -> normDist [0,1]
+    private TArray<FWaypointTriggerTime> ActiveTurnTriggers;
+    private int32 CurrentTriggerIndex = 0;
 
     UPROPERTY() float OriginalNominalSpeed = 0.0; 
     private float SegmentLength = 0.0;
@@ -79,7 +90,7 @@ class UTurnBasedMovementComponent : UActorComponent
     private float PickupEaseStartElapsed   = 0.0;  // ElapsedTime when StopForPickup was called
     private float PickupEaseOutDuration    = 0.0;  // seconds to complete the ease-out
 
-    ATopDown_GameState CachedGameState;
+    ATopDown_GameState CachedGameState; 
 
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
@@ -386,7 +397,7 @@ class UTurnBasedMovementComponent : UActorComponent
         return OriginalNominalSpeed;
     }
 
-    UFUNCTION()
+    UFUNCTION(BlueprintPure)
     bool HasPathDefined() const
     {
         return CheckpointDistances.Num() >= 1 && CheckpointDistances.Last() - StartDistance > 1.0;
@@ -449,8 +460,16 @@ class UTurnBasedMovementComponent : UActorComponent
         float ScaledDistance = Math::Min(PathSpline.GetSplineLength() - StartDistance, CurrentSpeed * CheckpointDistances.Num()) / 10.0;
         Distance = Math::RoundToInt(ScaledDistance);
         Days = PathDurationInTurns();
+        //Print(f"{CheckpointDistances.Num()}");
 
         return true;
+    }
+
+    UFUNCTION(BlueprintPure)
+    int GetPathDistance()
+    {
+        float ScaledDistance = Math::Min(PathSpline.GetSplineLength() - StartDistance, CurrentSpeed * CheckpointDistances.Num()) / 10.0;
+        return Math::RoundToInt(ScaledDistance);
     }
 
     UFUNCTION()
@@ -505,26 +524,26 @@ class UTurnBasedMovementComponent : UActorComponent
     }
 
     UFUNCTION()
-    bool QueuePathMidTurn(FVector DestinationLocation, FVector &out AdjustedLocation, int32&out Distance, int32&out Days)
+    bool QueuePathMidTurn(FVector DestinationLocation, FVector &out AdjustedLocation, int&out Distance, int&out Days)
     {
-        AdjustedLocation = FVector::ZeroVector;
-        Distance = 0;
-        Days = 0;
+        //AdjustedLocation = FVector::ZeroVector;
+        //Distance = 0;
+        //Days = 0;
 
         if (PathSpline == nullptr || Owner == nullptr)
             return false;
 
         if (bIsMoving)
         {
-            float SampleDist = Math::Max(0.0, EndDistance - 0.1f);
+            float SampleDist = Math::Max(0.0, EndDistance - 0.1);
             FVector EndPoint = PathSpline.GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
             FVector ForwardVector = PathSpline.GetDirectionAtDistanceAlongSpline(SampleDist, ESplineCoordinateSpace::World);
             FVector Destination = FVector(DestinationLocation.X, DestinationLocation.Y, ZLevel);
 
             // 1. TRUNCATE FIRST
-            for (int32 i = PathSpline.GetNumberOfSplinePoints() - 1; i >= 0; i--)
+            for (int i = PathSpline.GetNumberOfSplinePoints() - 1; i >= 0; i--)
             {
-                if (PathSpline.GetDistanceAlongSplineAtSplinePoint(i) > EndDistance + 0.5f)
+                if (PathSpline.GetDistanceAlongSplineAtSplinePoint(i) > EndDistance + 0.5)
                 {
                     PathSpline.RemoveSplinePoint(i, false);
                 }
@@ -532,10 +551,10 @@ class UTurnBasedMovementComponent : UActorComponent
             PathSpline.UpdateSpline();
 
             // 2. ADD OR REUSE ANCHOR (Shared Point)
-            int32 AnchorIdx = PathSpline.GetNumberOfSplinePoints() - 1;
+            int AnchorIdx = PathSpline.GetNumberOfSplinePoints() - 1;
             float TailDist = PathSpline.GetDistanceAlongSplineAtSplinePoint(AnchorIdx);
 
-            if (Math::Abs(TailDist - EndDistance) > 0.1f)
+            if (Math::Abs(TailDist - EndDistance) > 0.1)
             {
                 PathSpline.AddSplinePoint(EndPoint, ESplineCoordinateSpace::World, false);
                 AnchorIdx = PathSpline.GetNumberOfSplinePoints() - 1;
@@ -568,40 +587,29 @@ class UTurnBasedMovementComponent : UActorComponent
 
             PathSpline.UpdateSpline();
 
+            Print(f"{CheckpointDistances.Num()}");
             // 4. APPEND THE NEW PATH
             UPathingUtils::AddPointsToPath(PathSpline, EndPoint, ForwardVector, Destination,
                  400.0, EndDistance, ZLevel, CurrentSpeed, FPathProperties());
 
             float PathLength = PathSpline.GetSplineLength();
 
-            // Rebuild CheckpointDistances logic...
-            int32 DeletionIndex = -1;
-            for (int32 i = 0; i < CheckpointDistances.Num(); i++)
+            float StartingDistance = CheckpointDistances[0];
+            float EndingtDistance = EndDistance;
+
+            CheckpointDistances.Empty();
+            CheckpointDistances.Add(StartingDistance);
+            CheckpointDistances.Add(EndingtDistance);
+            for (float d = EndDistance + CurrentSpeed; d < PathLength; d += CurrentSpeed)
             {
-                // Use a slightly larger epsilon for the checkpoint search to avoid
-                // double-adding the current turn
-                if (CheckpointDistances[i] >= EndDistance - 1.0)
-                {
-                    DeletionIndex = i;
-                    break;
-                }
+                CheckpointDistances.Add(d);
             }
 
-            if (DeletionIndex != -1)
+            if (PathLength - CheckpointDistances.Last() >= 1.0)
             {
-                CheckpointDistances.RemoveAt(DeletionIndex);
-
-                CheckpointDistances.Add(EndDistance);
-                for (float d = EndDistance + CurrentSpeed; d < PathLength - 1.0; d += CurrentSpeed)
-                {
-                    CheckpointDistances.Add(d);
-                }
-
-                if (PathLength - CheckpointDistances.Last() > 1.0)
-                {
-                    CheckpointDistances.Add(PathLength);
-                }
+                CheckpointDistances.Add(PathLength);
             }
+            
 
             AdjustedLocation = PathSpline.GetLocationAtDistanceAlongSpline(PathSpline.GetSplineLength(), ESplineCoordinateSpace::World);
             float RemainingLen = PathSpline.GetSplineLength() - EndDistance;
@@ -710,9 +718,137 @@ class UTurnBasedMovementComponent : UActorComponent
     }
 
     //Returns the world location of the current path's location at the end of the turn
+    UFUNCTION(BlueprintPure)
     FVector GetPathEndOfTurnLocation()
     {
         return PathSpline.GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
     }
+
+    UFUNCTION()
+    void SetupWaypointRotationTimers()
+    {
+        ActiveTurnTriggers.Empty();
+
+        // 💡 Clean up old timer instances using the proper Name literal syntax
+        System::ClearTimer(this, "TriggerNextWaypointRotation");
+        CurrentTriggerIndex = 0;
+
+        if (PathSpline == nullptr || MovementCurve == nullptr)
+            return;
+
+        float TotalTurnDist = EndDistance - StartDistance;
+        int32 TotalPoints = PathSpline.GetNumberOfSplinePoints();
+        
+        if (TotalTurnDist <= 0.1)
+            return;
+        
+        // Fallback for short/simple straight paths
+        // BUG: The very first turn when we start the game, this fails to execute 
+        if (TotalPoints <= 4)
+        {
+            OnShipRotated.Broadcast(GetPathEndOfTurnLocation());
+            return;
+        }
+
+        // 💡 FIX: Removed the hardcoded InputKey(4) broadcast that was causing mid-path snaps.
+        // The loop below will now dynamically handle all initial and mid-turn rotations.
+
+        for (int32 i = 0; i < TotalPoints; i += 3)
+        {
+            float PointDist = PathSpline.GetDistanceAlongSplineAtSplinePoint(i);
+
+            // Check if this waypoint falls within our current turn's active tracking segment
+            if (PointDist >= StartDistance && PointDist <= EndDistance)
+            {
+                float TargetNormDist = (PointDist - StartDistance) / TotalTurnDist;
+                float FoundNormTime = GetTimeFromNormalizedDistance(TargetNormDist);
+
+                FWaypointTriggerTime Trigger;
+                
+                // 💡 FIX: Clamp the lookahead index to ensure we don't read past the end of the spline array
+                Trigger.SplinePointIndex = Math::Min(i + 3, TotalPoints - 1);
+                Trigger.NormalizedTime = FoundNormTime;
+                Trigger.ActualTimeSeconds = FoundNormTime * CachedGameState.TurnDuration;
+
+                ActiveTurnTriggers.Add(Trigger);
+            }
+        }
+
+        // Kick off the sequential timer chain if an upcoming waypoint was caught in this turn window
+        if (ActiveTurnTriggers.Num() > 0)
+        {
+            float FirstDelay = ActiveTurnTriggers[0].ActualTimeSeconds;
+            
+            // If a waypoint sits exactly at the start of the turn (ActualTimeSeconds == 0), 
+            // this clamp ensures it triggers immediately on the next frame.
+            FirstDelay = Math::Max(0.001f, FirstDelay); 
+            
+            System::SetTimer(this, n"TriggerNextWaypointRotation", FirstDelay, false);
+        }
+    }
+
+    // 💡 The Inverse Curve Solver via Binary Search
+    float GetTimeFromNormalizedDistance(float TargetNormDist)
+    {
+        // Guard boundaries
+        if (TargetNormDist <= 0.0) return 0.0;
+        if (TargetNormDist >= 1.0) return 1.0;
+
+        float LowTime = 0.0;
+        float HighTime = 1.0;
+        float EstimatedTime = 0.5;
+
+        // 12 iterations gives an accuracy of 1/4096 (~0.0002 precision),
+        // which takes less than a microsecond but matches frames flawlessly.
+        for (int i = 0; i < 12; i++)
+        {
+            EstimatedTime = (LowTime + HighTime) * 0.5;
+            float CurrentNormDist = MovementCurve.GetFloatValue(EstimatedTime);
+
+            if (CurrentNormDist < TargetNormDist)
+                LowTime = EstimatedTime; // Search upper half
+            else
+                HighTime = EstimatedTime; // Search lower half
+        }
+
+        return EstimatedTime;
+    }
+
+    UFUNCTION()
+    void TriggerNextWaypointRotation()
+    {
+        // Safety check to ensure we haven't overrun the array boundaries
+        if (!ActiveTurnTriggers.IsValidIndex(CurrentTriggerIndex))
+            return;
+
+        FWaypointTriggerTime TriggerData = ActiveTurnTriggers[CurrentTriggerIndex];
+
+        // 💡 1. Execute your custom rotation handler here!
+        // Pass the target waypoint index to your active rotation component/logic.
+        FVector DestinationLocation = PathSpline.GetLocationAtSplineInputKey(Math::RoundToInt(TriggerData.SplinePointIndex), ESplineCoordinateSpace::World);
+        //System::DrawDebugSphere(DestinationLocation, Radius=100, Duration=2);
+        OnShipRotated.Broadcast(DestinationLocation); 
+
+        // 2. Advance the tracker index to prime the next target
+        CurrentTriggerIndex++;
+
+        // 3. If there are remaining waypoints this turn, calculate the relative time difference
+        if (CurrentTriggerIndex < ActiveTurnTriggers.Num())
+        {
+            float NextAbsoluteTime = ActiveTurnTriggers[CurrentTriggerIndex].ActualTimeSeconds;
+            float CurrentAbsoluteTime = TriggerData.ActualTimeSeconds;
+            
+            // 💡 This is the precise delta time between the two events
+            float TimeDifference = NextAbsoluteTime - CurrentAbsoluteTime;
+            
+            // Clamp to a tiny positive float value to keep execution ordered 
+            // even if multiple waypoints share almost identical spacing metrics
+            TimeDifference = Math::Max(0.001f, TimeDifference);
+
+            // 4. Arm the next timer sequence using the relative difference
+            System::SetTimer(this, n"TriggerNextWaypointRotation", TimeDifference, false);
+        }
+    }
+
 }
 

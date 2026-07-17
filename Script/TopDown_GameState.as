@@ -32,7 +32,7 @@ class ATopDown_GameState : AGameStateBase
     UPROPERTY() float NormalizedTurnProgress = 1.0; 
     UPROPERTY() bool bIsGamePaused = false;
 
-    //UPROPERTY() TArray<UTurnBasedMovementComponent> GameObjects;
+    UPROPERTY() TArray<AGameObject> GameObjects;
 
     bool bQueuePause = false;
 
@@ -45,6 +45,8 @@ class ATopDown_GameState : AGameStateBase
         TurnDuration = UTopDown_Settings().GetTurnDuration();
 
         OnGameStateReady.Broadcast();
+
+        GetAllActorsOfClass(GameObjects);
         
         HandleTurn();
     }
@@ -89,7 +91,12 @@ class ATopDown_GameState : AGameStateBase
         {
             SetActorTickEnabled(true);
             NormalizedTurnProgress = 0.0; //otherwise ships will teleport to their destination on the 1st frame
-            OnTurnResume.Broadcast(); //turn was paused, now we unpause, broadcast to every object
+            
+            for (AGameObject GameObject : GameObjects)
+            {
+                GameObject.TurnResume();
+            }
+            OnTurnResume.Broadcast();
             HandleTurn();
         }
     }
@@ -108,9 +115,15 @@ class ATopDown_GameState : AGameStateBase
     {
         if (!bQueuePause)
         {
-            OnTurnUpdate.Broadcast(); 
             CurrentTurnDate = CurrentTurnDate + OneTurn;
             bIsGamePaused = false;
+
+            for (AGameObject GameObject : GameObjects)
+            {
+                GameObject.TurnUpdate();
+            }
+            
+
 
             TurnTimer = System::SetTimer(this, n"HandleTurn", TurnDuration, false);
         }
@@ -118,7 +131,13 @@ class ATopDown_GameState : AGameStateBase
         {   
             SetActorTickEnabled(false);
             bIsGamePaused = true;
+            
+            for (AGameObject GameObject : GameObjects)
+            {
+                GameObject.TurnPause();
+            }
             OnTurnPaused.Broadcast();
+
             System::ClearAndInvalidateTimerHandle(TurnTimer);
         }
     }
