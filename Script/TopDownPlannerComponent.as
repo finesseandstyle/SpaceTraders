@@ -42,6 +42,7 @@ class UTopDownPlannerComponent : UActorComponent
     UPROPERTY() TArray<AActor> Stars;
 
     UPROPERTY() bool bMultiWaypoint = false;
+    UPROPERTY() bool bRotatingPath = false;
     UPROPERTY() float PathClickingDistance = 100;
 
     UPROPERTY() UNiagaraComponent PlayerPath;
@@ -157,7 +158,6 @@ class UTopDownPlannerComponent : UActorComponent
     {
         MoveComp.CancelPath();
         HidePath();
-        //Hide Path
     }
 
     //Duration -1 means we draw forever until there's a change
@@ -210,6 +210,7 @@ class UTopDownPlannerComponent : UActorComponent
                 HidePathHandle = System::SetTimer(this, n"HidePath", Duration, false);
             }
 
+            //We can set our path to show a hostile action. 
             //PlayerPath.SetFloatParameter(n"CurrentPathOpacity", 0.7);    
             //PlayerPath.SetFloatParameter(n"RemainingPathOpacity", 0.4);    
         }
@@ -234,5 +235,17 @@ class UTopDownPlannerComponent : UActorComponent
             PlayerPath.DestroyComponent();
         }
         TurnMarker.SetActorHiddenInGame(true);
+    }
+
+    UFUNCTION()
+    void GoToRotatedLocation(FVector ClickStartLocation, FVector DragEndLocation)
+    {
+        if (!Cast<ATopDown_GameState>(Gameplay::GetGameState()).bIsGamePaused)
+            return;
+
+        FVector AdjustedLocation;
+        int Distance, Days;
+        MoveComp.SetRotatedPath(ClickStartLocation, DragEndLocation, Distance, Days, AdjustedLocation);
+        DrawPath(MoveComp, AdjustedLocation, Distance, Days);
     }
 }

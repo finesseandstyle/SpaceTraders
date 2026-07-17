@@ -539,6 +539,30 @@ class UTurnBasedMovementComponent : UActorComponent
             FVector EndPoint = PathSpline.GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
             FVector ForwardVector = PathSpline.GetDirectionAtDistanceAlongSpline(SampleDist, ESplineCoordinateSpace::World);
             FVector Destination = FVector(DestinationLocation.X, DestinationLocation.Y, ZLevel);
+            
+            /*
+            int32 LastSurvivingIdx = PathSpline.GetNumberOfSplinePoints() - 1;
+            while (LastSurvivingIdx > 0 && PathSpline.GetDistanceAlongSplineAtSplinePoint(LastSurvivingIdx) > EndDistance + 0.5f)
+            {
+                LastSurvivingIdx--;
+            }
+            int32 ArcPhase = LastSurvivingIdx % 3; // 0: only ArcStart survives, 1: ArcStart+Mid survive, 2: in the straight run — nothing to fix
+
+            FVector CurvaturePos = FVector::ZeroVector;
+            FVector CurvatureTangent = FVector::ZeroVector;
+            if (ArcPhase == 0)
+            {
+                // Only the arc's start point survives. Sample the TRUE curve shape at the
+                // cut now — once we truncate, there's nothing left past ArcStart to
+                // interpolate against, so this has to happen before that loop runs.
+                FVector ArcStartLoc  = PathSpline.GetLocationAtSplinePoint(LastSurvivingIdx, ESplineCoordinateSpace::World);
+                float   ArcStartDist = PathSpline.GetDistanceAlongSplineAtSplinePoint(LastSurvivingIdx);
+                float   ArcSampleDist   = (ArcStartDist + EndDistance) * 0.5;
+
+                CurvaturePos = PathSpline.GetLocationAtDistanceAlongSpline(ArcSampleDist, ESplineCoordinateSpace::World);
+                CurvatureTangent = PathSpline.GetDirectionAtDistanceAlongSpline(ArcSampleDist, ESplineCoordinateSpace::World)
+                                    * ArcStartLoc.Distance(EndPoint) * 0.5;
+            }*/
 
             // 1. TRUNCATE FIRST
             for (int i = PathSpline.GetNumberOfSplinePoints() - 1; i >= 0; i--)
@@ -564,6 +588,8 @@ class UTurnBasedMovementComponent : UActorComponent
                 PathSpline.SetLocationAtSplinePoint(AnchorIdx, EndPoint, ESplineCoordinateSpace::World, false);
             }
 
+
+
             // 3. FIX THE "HANDOVER" SEGMENT (Point before Anchor -> Anchor)
             if (AnchorIdx > 0)
             {
@@ -586,31 +612,68 @@ class UTurnBasedMovementComponent : UActorComponent
             }
 
             PathSpline.UpdateSpline();
+            //4. Compensate for the fact that we may delete some points in between the curve to maintain the 4 +3n point count
+            PadSplineToFormula(AnchorIdx);
+            /*
+            // 4. Compensate for the fact that we may delete some points in between the curve to maintain the 4 +3n point count
+            if (ArcPhase == 0)
+            {
+                Print("Arc Phase 0", 2);
+                // Insert a real point between the surviving arc-start and the anchor —
+                // same tangent used for arrive/leave, matching how BuildDubinsArc treats
+                // interior arc points — then a degenerate point coincident with the
+                // anchor so the trailing straight-pair stays a zero-length "straight".
+                PathSpline.AddSplinePointAtIndex(CurvaturePos, AnchorIdx, ESplineCoordinateSpace::World, false);
+                PathSpline.SetSplinePointType(AnchorIdx, ESplinePointType::CurveCustomTangent, false);
+                PathSpline.SetTangentsAtSplinePoint(AnchorIdx, CurvatureTangent, CurvatureTangent, ESplineCoordinateSpace::World, false);
+                AnchorIdx++;
 
-            Print(f"{CheckpointDistances.Num()}");
-            // 4. APPEND THE NEW PATH
+                PathSpline.AddSplinePointAtIndex(EndPoint, AnchorIdx, ESplineCoordinateSpace::World, false);
+                PathSpline.SetSplinePointType(AnchorIdx, ESplinePointType::CurveCustomTangent, false);
+                PathSpline.SetTangentsAtSplinePoint(AnchorIdx, FVector::ZeroVector, FVector::ZeroVector, ESplineCoordinateSpace::World, false);
+                AnchorIdx++;
+
+                PathSpline.UpdateSpline();
+            }
+            else if (ArcPhase == 1)
+            {
+                Print("Arc Phase 1", 2);
+                // Both real arc points survived, so curvature is already represented —
+                // just complete the pairing with one dummy at the anchor.
+                PathSpline.AddSplinePointAtIndex(EndPoint, AnchorIdx, ESplineCoordinateSpace::World, false);
+                PathSpline.SetSplinePointType(AnchorIdx, ESplinePointType::CurveCustomTangent, false);
+                PathSpline.SetTangentsAtSplinePoint(AnchorIdx, FVector::ZeroVector, FVector::ZeroVector, ESplineCoordinateSpace::World, false);
+                AnchorIdx++;
+
+                PathSpline.UpdateSpline();
+            }
+            else {
+                Print("Arc Phase 2", 2);
+            }
+            // ArcPhase == 2: cut landed in the straight run — already 4 + 3n, nothing to add.
+            */
+            // 5. APPEND THE NEW PATH
             UPathingUtils::AddPointsToPath(PathSpline, EndPoint, ForwardVector, Destination,
                  400.0, EndDistance, ZLevel, CurrentSpeed, FPathProperties());
 
-            float PathLength = PathSpline.GetSplineLength();
 
+            float PathLength = PathSpline.GetSplineLength();
             float StartingDistance = CheckpointDistances[0];
-            float EndingtDistance = EndDistance;
+            float EndingDistance = EndDistance;
 
             CheckpointDistances.Empty();
             CheckpointDistances.Add(StartingDistance);
-            CheckpointDistances.Add(EndingtDistance);
+            CheckpointDistances.Add(EndingDistance);
             for (float d = EndDistance + CurrentSpeed; d < PathLength; d += CurrentSpeed)
             {
                 CheckpointDistances.Add(d);
             }
 
-            if (PathLength - CheckpointDistances.Last() >= 1.0)
+            if (PathLength - CheckpointDistances.Last() >= 10.0)
             {
                 CheckpointDistances.Add(PathLength);
             }
             
-
             AdjustedLocation = PathSpline.GetLocationAtDistanceAlongSpline(PathSpline.GetSplineLength(), ESplineCoordinateSpace::World);
             float RemainingLen = PathSpline.GetSplineLength() - EndDistance;
             Distance = Math::RoundToInt(RemainingLen / 10.0);
@@ -624,7 +687,7 @@ class UTurnBasedMovementComponent : UActorComponent
     }
 
     UFUNCTION()
-    bool SetRotatedPath(FVector DestinationLocation, FVector DestinationDirection, int32 &out Distance, int32 &out Days, FVector &out AdjustedLocation)
+    bool SetRotatedPath(FVector StartLocation, FVector DragEndLocation, int32 &out Distance, int32 &out Days, FVector &out AdjustedLocation)
     {
         Distance = 0;
         Days = 0;
@@ -635,8 +698,8 @@ class UTurnBasedMovementComponent : UActorComponent
 
         FVector StartPos = FVector(Owner.ActorLocation.X, Owner.ActorLocation.Y, ZLevel);
         FVector StartDir = FVector(Owner.ActorForwardVector.X, Owner.ActorForwardVector.Y, 0.0).GetSafeNormal();
-        FVector EndPos = FVector(DestinationLocation.X, DestinationLocation.Y, ZLevel);
-        FVector EndDir = (DestinationDirection - DestinationLocation).GetSafeNormal();
+        FVector EndPos = FVector(StartLocation.X, StartLocation.Y, ZLevel);
+        FVector EndDir = (DragEndLocation - StartLocation).GetSafeNormal();
 
         TArray<FPathPoint> Points = UPathingUtils::BuildRotatedDubinsPath(StartPos, StartDir, EndPos, EndDir, CurrentSpeed, ZLevel, FPathProperties());
 
@@ -750,6 +813,15 @@ class UTurnBasedMovementComponent : UActorComponent
             return;
         }
 
+        FWaypointTriggerTime Trigger1;
+        
+        // 💡 FIX: Clamp the lookahead index to ensure we don't read past the end of the spline array
+        Trigger1.SplinePointIndex = Math::CeilToInt(PathSpline.FindInputKeyClosestToWorldLocation(Owner.ActorLocation));
+        Trigger1.SplinePointIndex = 4 + 3 * Math::IntegerDivisionTrunc(Math::Max(0, Trigger1.SplinePointIndex - 1), 3);
+        Trigger1.NormalizedTime = 0;
+        Trigger1.ActualTimeSeconds = 0;
+        ActiveTurnTriggers.Add(Trigger1);
+    
         // 💡 FIX: Removed the hardcoded InputKey(4) broadcast that was causing mid-path snaps.
         // The loop below will now dynamically handle all initial and mid-turn rotations.
 
@@ -778,12 +850,20 @@ class UTurnBasedMovementComponent : UActorComponent
         if (ActiveTurnTriggers.Num() > 0)
         {
             float FirstDelay = ActiveTurnTriggers[0].ActualTimeSeconds;
+
+            if (FirstDelay == 0)
+            {
+                TriggerNextWaypointRotation();
+            }
+            else {
             
-            // If a waypoint sits exactly at the start of the turn (ActualTimeSeconds == 0), 
-            // this clamp ensures it triggers immediately on the next frame.
-            FirstDelay = Math::Max(0.001f, FirstDelay); 
-            
-            System::SetTimer(this, n"TriggerNextWaypointRotation", FirstDelay, false);
+                // If a waypoint sits exactly at the start of the turn (ActualTimeSeconds == 0), 
+                // this clamp ensures it triggers immediately on the next frame.
+                FirstDelay = Math::Max(0.001f, FirstDelay); 
+                
+                System::SetTimer(this, n"TriggerNextWaypointRotation", FirstDelay, false);
+
+            }
         }
     }
 
@@ -848,6 +928,35 @@ class UTurnBasedMovementComponent : UActorComponent
             // 4. Arm the next timer sequence using the relative difference
             System::SetTimer(this, n"TriggerNextWaypointRotation", TimeDifference, false);
         }
+    }
+
+    //attempt to fix 
+    private void PadSplineToFormula(int&out AnchorIdx)
+    {
+        int CurrentCount = PathSpline.GetNumberOfSplinePoints();
+        int DummyCount = (((1 - CurrentCount) % 3) + 3) % 3;
+        if (DummyCount <= 0)
+            return;
+
+        FVector AnchorLoc    = PathSpline.GetLocationAtSplinePoint(AnchorIdx, ESplineCoordinateSpace::World);
+        FVector AnchorArrive = PathSpline.GetArriveTangentAtSplinePoint(AnchorIdx, ESplineCoordinateSpace::World);
+
+        PathSpline.RemoveSplinePoint(AnchorIdx, false);
+
+        for (int32 i = 0; i < DummyCount; i++)
+        {
+            PathSpline.AddSplinePoint(AnchorLoc, ESplineCoordinateSpace::World, false);
+            int32 NewIdx = PathSpline.GetNumberOfSplinePoints() - 1;
+            PathSpline.SetSplinePointType(NewIdx, ESplinePointType::Linear, false);
+            //PathSpline.SetTangentsAtSplinePoint(NewIdx, FVector::ZeroVector, FVector::ZeroVector, ESplineCoordinateSpace::World, false);
+        }
+
+        PathSpline.AddSplinePoint(AnchorLoc, ESplineCoordinateSpace::World, false);
+        AnchorIdx = PathSpline.GetNumberOfSplinePoints() - 1;
+        PathSpline.SetSplinePointType(AnchorIdx, ESplinePointType::Linear, false);
+        //PathSpline.SetTangentsAtSplinePoint(AnchorIdx, AnchorArrive, FVector::ZeroVector, ESplineCoordinateSpace::World, false);
+        
+        PathSpline.UpdateSpline();
     }
 
 }
