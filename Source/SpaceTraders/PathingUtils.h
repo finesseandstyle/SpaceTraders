@@ -35,7 +35,7 @@ struct FPathProperties
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Spline Movement|Curve Shape")
 	float CurveSlowdownExponent = 1.5f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Spline Movement|Curve Shape")
-	float EaseFraction = 0.08f;
+	float EaseFraction = 0.15f;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Spline Movement|Curve Shape")
     float EaseExponent = 2.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Spline Movement|Curve Shape")
@@ -81,8 +81,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Pathing", meta = (WorldContext = "WorldContextObject"))
 	static UCurveFloat* GetMovementCurve(UObject* WorldContextObject, const USplineComponent* PathSpline, const float EaseInDistance,
 		const float EaseOutDistance, const float StartDistance, const float SegmentLength, const FPathProperties& PathProperties);
-		
 	
+	UFUNCTION(BlueprintCallable, Category = "Pathing", meta = (WorldContext = "WorldContextObject"))
+	static UCurveFloat* GetMovementCurve2(UObject* WorldContextObject, const USplineComponent* PathSpline, float StartDistance,
+	                               float SegmentLength, float TurnDuration, float EntrySpeed,
+	                               const FPathProperties& PathProperties);
+
+
 	UFUNCTION(BlueprintCallable, Category = "Pathing")
 	static FVector PredictPlanetInterceptCS(const FTransform& ShipTransform, float ZLevel, const FVector& OrbitCenter, float OrbitRadius,
 	                                        float CurrentAngleDeg, float OrbitTurns, int32 MaxIterations, float CurrentSpeed, const FPathProperties& PathProperties);

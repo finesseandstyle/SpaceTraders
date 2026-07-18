@@ -80,7 +80,6 @@ class UTurnBasedMovementComponent : UActorComponent
     private bool  bCurveReady = false;
     private float OriginalEndDistance  = 0.0; // EndDistance at the time of StopForPickup
     // SegmentLength / RemainingTurnDuration at StartMovement — never changes
-    private float PreviousTurnSpeed    = 0.0; // We store the object's previous speed at every turn
 
     // Pickup related things
     private FVector OriginalDirection = FVector::ZeroVector;
@@ -212,7 +211,7 @@ class UTurnBasedMovementComponent : UActorComponent
     }
 
     UFUNCTION()
-    void PrecomputeMovementCurve(float EaseInDistance, float EaseOutDistance)
+    void PrecomputeMovementCurve()
     {
         bCurveReady = false;
 
@@ -229,8 +228,12 @@ class UTurnBasedMovementComponent : UActorComponent
             return;
         }
 
-        MovementCurve = UPathingUtils::GetMovementCurve(PathSpline, EaseInDistance, EaseOutDistance,
-                                                         StartDistance, SegmentLength, FPathProperties());
+        Print(f"Current Nominal Speed: {SegmentLength / CachedGameState.TurnDuration} - Previous Nominal Speed: {OriginalNominalSpeed}", 2);
+        FPathProperties Path;
+        Path.EaseFraction = 0.05;
+        Path.SampleInterval = 100;
+        MovementCurve = UPathingUtils::GetMovementCurve2(PathSpline, StartDistance, SegmentLength, CachedGameState.TurnDuration, OriginalNominalSpeed, Path);
+        //MovementCurve = UPathingUtils::GetMovementCurve(PathSpline, 0, 0, StartDistance, SegmentLength, FPathProperties());
 
         bCurveReady = (MovementCurve != nullptr);
     }
@@ -366,7 +369,7 @@ class UTurnBasedMovementComponent : UActorComponent
         RemainingTurnDuration = RemainingTime;
         ElapsedTime   = 0.0;
 
-        PrecomputeMovementCurve(PickupEaseDistance, 0.0);
+        PrecomputeMovementCurve();
 
         SetComponentTickEnabled(true);
         OnPenaltyApplied.Broadcast(PenaltyDuration, NewEndDistance);
@@ -618,44 +621,6 @@ class UTurnBasedMovementComponent : UActorComponent
             PathSpline.UpdateSpline();
             //4. Compensate for the fact that we may delete some points in between the curve to maintain the 4 +3n point count
             PadSplineToFormula(AnchorIdx);
-            /*
-            // 4. Compensate for the fact that we may delete some points in between the curve to maintain the 4 +3n point count
-            if (ArcPhase == 0)
-            {
-                Print("Arc Phase 0", 2);
-                // Insert a real point between the surviving arc-start and the anchor —
-                // same tangent used for arrive/leave, matching how BuildDubinsArc treats
-                // interior arc points — then a degenerate point coincident with the
-                // anchor so the trailing straight-pair stays a zero-length "straight".
-                PathSpline.AddSplinePointAtIndex(CurvaturePos, AnchorIdx, ESplineCoordinateSpace::World, false);
-                PathSpline.SetSplinePointType(AnchorIdx, ESplinePointType::CurveCustomTangent, false);
-                PathSpline.SetTangentsAtSplinePoint(AnchorIdx, CurvatureTangent, CurvatureTangent, ESplineCoordinateSpace::World, false);
-                AnchorIdx++;
-
-                PathSpline.AddSplinePointAtIndex(EndPoint, AnchorIdx, ESplineCoordinateSpace::World, false);
-                PathSpline.SetSplinePointType(AnchorIdx, ESplinePointType::CurveCustomTangent, false);
-                PathSpline.SetTangentsAtSplinePoint(AnchorIdx, FVector::ZeroVector, FVector::ZeroVector, ESplineCoordinateSpace::World, false);
-                AnchorIdx++;
-
-                PathSpline.UpdateSpline();
-            }
-            else if (ArcPhase == 1)
-            {
-                Print("Arc Phase 1", 2);
-                // Both real arc points survived, so curvature is already represented —
-                // just complete the pairing with one dummy at the anchor.
-                PathSpline.AddSplinePointAtIndex(EndPoint, AnchorIdx, ESplineCoordinateSpace::World, false);
-                PathSpline.SetSplinePointType(AnchorIdx, ESplinePointType::CurveCustomTangent, false);
-                PathSpline.SetTangentsAtSplinePoint(AnchorIdx, FVector::ZeroVector, FVector::ZeroVector, ESplineCoordinateSpace::World, false);
-                AnchorIdx++;
-
-                PathSpline.UpdateSpline();
-            }
-            else {
-                Print("Arc Phase 2", 2);
-            }
-            // ArcPhase == 2: cut landed in the straight run — already 4 + 3n, nothing to add.
-            */
             // 5. APPEND THE NEW PATH
             UPathingUtils::AddPointsToPath(PathSpline, EndPoint, ForwardVector, Destination,
                  400.0, EndDistance, ZLevel, CurrentSpeed, FPathProperties());

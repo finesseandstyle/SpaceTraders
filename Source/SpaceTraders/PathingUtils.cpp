@@ -262,6 +262,119 @@ UCurveFloat* UPathingUtils::GetMovementCurve(UObject* WorldContextObject,
     return MovementCurveInstance;
 }
 
+UCurveFloat* UPathingUtils::GetMovementCurve2(UObject* WorldContextObject,
+                                                const USplineComponent* PathSpline,
+                                                const float StartDistance,
+                                                const float SegmentLength,
+                                                const float TurnDuration,
+                                                const float EntrySpeed,
+                                                const FPathProperties& PathProperties)
+{
+    // 1. Validate inputs and return nullptr instead of an empty struct
+    if (!WorldContextObject || !PathSpline || SegmentLength <= KINDA_SMALL_NUMBER || TurnDuration <= KINDA_SMALL_NUMBER)
+    {
+        return nullptr;
+    }
+
+    const int32 N = FMath::Max(FMath::RoundToInt(SegmentLength / PathProperties.SampleInterval) + 1, 4);
+
+    // ------------------------------------------------------------------
+    // Step 1 – Curvature weights: the segment's natural, unblended speed profile
+    // ------------------------------------------------------------------
+    TArray<float> SpeedWeight;
+    SpeedWeight.SetNumUninitialized(N);
+
+    for (int32 i = 0; i < N; i++)
+    {
+        const float Alpha     = static_cast<float>(i) / (N - 1);
+        const float WorldDist = StartDistance + Alpha * SegmentLength;
+        SpeedWeight[i]        = SampleCurvatureWeight(PathSpline, WorldDist, PathProperties);
+    }
+
+    // Step 2 – cross-turn entry blend
+    //
+    // Blend toward THIS segment's own natural weight AT POSITION 0, not its
+    // mean. Referencing the mean produced a phantom boost/dip even at a
+    // constant commanded speed, because curvature anywhere else in the
+    // segment pulls the mean away from the local start value — matching the
+    // mean exactly reproduces a level-shift at k=0 unrelated to any real
+    // speed change. Referencing the local start value instead makes the
+    // blend a true no-op whenever EntryRatio == 1, and only actually engages
+    // when the commanded speed genuinely differs between turns.
+    const float NaturalStartWeight = SpeedWeight[0];
+    const float NominalSpeed       = SegmentLength / TurnDuration;
+
+    if (NominalSpeed > KINDA_SMALL_NUMBER && NaturalStartWeight > KINDA_SMALL_NUMBER)
+    {
+        const float EntryRatio        = FMath::Clamp(EntrySpeed / NominalSpeed, 0.f, 3.f);
+        const float EntryTargetWeight = EntryRatio * NaturalStartWeight;
+
+        // Sized from sample count (== fixed fraction of TurnDuration), not a
+        // world distance — keeps the transition symmetric in time whether
+        // speeding up or slowing down.
+        const int32 BlendSamples = FMath::Clamp(
+            FMath::RoundToInt(PathProperties.EaseFraction * (N - 1)) + 1, 2, N);
+
+        for (int32 k = 0; k < BlendSamples; k++)
+        {
+            const float T      = static_cast<float>(k) / (BlendSamples - 1);
+            const float BlendT = FMath::Pow(T, PathProperties.EaseExponent);
+            SpeedWeight[k] = FMath::Lerp(EntryTargetWeight, SpeedWeight[k], BlendT);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Step 3 – Integrate: cumulative distance proportional to weights
+    // ------------------------------------------------------------------
+    TArray<float> CumulativeDistance;
+    CumulativeDistance.SetNumUninitialized(N);
+    CumulativeDistance[0] = 0.f;
+
+    for (int32 i = 1; i < N; i++)
+    {
+        const float AvgW = (SpeedWeight[i - 1] + SpeedWeight[i]) * 0.5f;
+        CumulativeDistance[i] = CumulativeDistance[i - 1] + FMath::Max(AvgW, 1e-4f);
+    }
+
+    const float TotalCumulativeDistance = CumulativeDistance[N - 1];
+
+    // ------------------------------------------------------------------
+    // Step 4 – Create the UCurveFloat Object and populate FloatCurve
+    // ------------------------------------------------------------------
+    UCurveFloat* MovementCurveInstance = NewObject<UCurveFloat>(WorldContextObject);
+    if (!MovementCurveInstance)
+    {
+        return nullptr;
+    }
+
+    FRichCurve& RichCurve = MovementCurveInstance->FloatCurve;
+    RichCurve.Reset();
+    RichCurve.SetDefaultValue(0.f);
+
+    for (int32 i = 0; i < N; i++)
+    {
+        const float NormTime = static_cast<float>(i) / (N - 1);
+        const float NormDist = CumulativeDistance[i] / TotalCumulativeDistance;
+
+        const FKeyHandle Handle = RichCurve.AddKey(NormTime, NormDist);
+        RichCurve.SetKeyInterpMode(Handle, RCIM_Linear);
+    }
+
+    // Pin endpoints exactly to avoid floating-point drift at boundaries
+    {
+        TArray<FRichCurveKey>& Keys = RichCurve.Keys;
+        if (Keys.Num() > 0)
+        {
+            Keys[0].Time     = 0.f;
+            Keys[0].Value    = 0.f;
+            Keys.Last().Time  = 1.f;
+            Keys.Last().Value = 1.f;
+        }
+    }
+
+    return MovementCurveInstance;
+}
+
 FVector UPathingUtils::PredictPlanetInterceptCS(const FTransform& ShipTransform, const float ZLevel, const FVector& OrbitCenter, 
                                                 const float OrbitRadius, const float CurrentAngleDeg, const float OrbitTurns, const int32 MaxIterations, const float CurrentSpeed, const FPathProperties& PathProperties)
 {    
