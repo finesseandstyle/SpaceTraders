@@ -1,6 +1,3 @@
-event void FOnMovementComplete2();
-event void FOnPenaltyApplied2(float PenaltyDuration, float NewEndDistance);
-
 /**
  * Drives an actor along a USplineComponent over a fixed duration, guaranteeing
  * checkpoint arrival regardless of speed variation along the path.
@@ -36,23 +33,43 @@ enum EShipMovementState
     NoPathDefined,
     HasPathDefined,
     Moving,
-    EasingForPickup,
     StoppedForPickup
 }
 
-struct FWaypointTriggerTime
+struct FBeamState
 {
-    int32 SplinePointIndex;
-    float NormalizedTime; // [0, 1] within this turn
-    float ActualTimeSeconds; // Scaled to your turn's actual duration
-}
+    AActor Item = nullptr;
+    int32 BeamIndex = 0;
+};
+
+struct FStopEvent
+{
+    float StopDistance = 0.0;
+    FVector StopLocation = FVector::ZeroVector;
+    TArray<AActor> PendingItems;
+};
+
+struct FTurnState
+{
+    TArray<FBeamState> ActiveBeams;
+    TArray<AActor> BeamQueue;
+    TArray<FStopEvent> RemainingPlan;
+};
+
+// Helper struct for internal calculation in PlanCollectionStops
+struct FItemWindow
+{
+    AActor Item;
+    float Entry;
+    float Exit;
+    float OptDist;
+};
 
 UCLASS()
 class UTurnBasedMovementComponent : UActorComponent
 {
-    UPROPERTY() FOnMovementComplete2 OnMovementComplete;
-    UPROPERTY() FOnPenaltyApplied2 OnPenaltyApplied;
 
+    // MOVEMENT
     UPROPERTY() TArray<float32> CheckpointDistances;
     UPROPERTY() float CurrentSpeed = 5000.0;
     UPROPERTY() float ZLevel = 810.0;
@@ -61,118 +78,43 @@ class UTurnBasedMovementComponent : UActorComponent
     UPROPERTY() float StartDistance = 0.0;
     UPROPERTY() float EndDistance = 1000.0;
 
-    UPROPERTY() float PickupEaseDistance = 100.0;
-    UPROPERTY() float TractorBeamRadius = 750.0;
-    UPROPERTY() float TractorBeamPullSpeed = 1000.0;
-
-    UPROPERTY() EShipMovementState MovementState; //TODO: this replaces bIsMoving, bCurveReady, bStopepdForPickup, bPickupEasingOut
-
+    UPROPERTY() EShipMovementState MovementState = EShipMovementState::NoPathDefined;
     private UCurveFloat MovementCurve; // normTime [0,1] -> normDist [0,1]
-    private TArray<FWaypointTriggerTime> ActiveTurnTriggers;
-    private int32 CurrentTriggerIndex = 0;
 
     UPROPERTY() float OriginalNominalSpeed = 0.0; 
     private float SegmentLength = 0.0;
-    private float RemainingTurnDuration;
-    private bool  bIsMoving = false;
-    private bool  bCurveReady = false;
-    private float OriginalEndDistance  = 0.0; // EndDistance at the time of StopForPickup
-    // SegmentLength / RemainingTurnDuration at StartMovement — never changes
+    private float StoppedTimeStart, StoppedTimeEnd = 0;
 
     // Pickup related things
     private FVector OriginalDirection = FVector::ZeroVector;
-    private bool  bStoppedForPickup        = false;
-    private bool  bPickupEasingOut         = false; // true while decelerating to the stop point
-    private float PickupEaseStartWorldDist = 0.0;  // world dist where StopForPickup was called
-    private float PickupEaseEndWorldDist   = 0.0;  // world dist where ship comes to full stop
-    private float PickupEaseStartElapsed   = 0.0;  // ElapsedTime when StopForPickup was called
-    private float PickupEaseOutDuration    = 0.0;  // seconds to complete the ease-out
 
     ATopDown_GameState CachedGameState; 
+
+    // PICKUPS
+    UPROPERTY() float TractorBeamRadius = 750.0;
+    UPROPERTY() float TractorBeamPullSpeed = 1000.0;
 
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
     {
         SetComponentTickEnabled(false);
         CachedGameState = Cast<ATopDown_GameState>(Gameplay::GetGameState());
-        RemainingTurnDuration = CachedGameState.TurnDuration;
     }
 
     UFUNCTION(BlueprintOverride)
     void Tick(float DeltaSeconds)
     {
-        if (!bIsMoving || PathSpline == nullptr || !bCurveReady)
+        if (PathSpline == nullptr || MovementState == EShipMovementState::NoPathDefined)
             return;
 
-        if (Owner == nullptr)
-            return;
-
-        if (bStoppedForPickup)
+        if (MovementState == EShipMovementState::StoppedForPickup)
         {
-            // Easing out should not be reset after every turn
-            if (bPickupEasingOut)
-            {
-                // Phase 1: decelerate to a stop along the spline.
-                // T goes 0->1 over PickupEaseOutDuration seconds.
-                // Ease-out shape: position advances quickly then slows — mirrors
-                // a power ramp where the derivative starts high and reaches zero.
-                float T = Math::Clamp((CachedGameState.GetElapsedTime() - PickupEaseStartElapsed) / PickupEaseOutDuration, 0.0, 1.0);
-                float EasedT = 1.0 - Math::Pow(1.0 - T, FPathProperties().EaseExponent);
-                float WorldDist = Math::Lerp(PickupEaseStartWorldDist, PickupEaseEndWorldDist, EasedT);
-
-                Owner.SetActorLocation(PathSpline.GetLocationAtDistanceAlongSpline(WorldDist, ESplineCoordinateSpace::World));
-
-                if (T >= 1.0)
-                    bPickupEasingOut = false;
-            }
-
             // Logic for claiming Items
-
             return;
         }
 
         // Normal movement — evaluate the main curve
-        float NormDist  = MovementCurve.GetFloatValue(CachedGameState.NormalizedTurnProgress);
-        float WorldDist = StartDistance + NormDist * SegmentLength;
-
-        Owner.SetActorLocation(PathSpline.GetLocationAtDistanceAlongSpline(WorldDist, ESplineCoordinateSpace::World));
-        //Owner.SetActorLocation(Owner.GetActorLocation() + FVector(1, 1, 0));
-    }
-
-    void Update(float NormTime)
-    {
-        if (!bIsMoving || PathSpline == nullptr || !bCurveReady)
-            return;
-
-        if (Owner == nullptr)
-            return;
-
-        if (bStoppedForPickup)
-        {
-            // Easing out should not be reset after every turn
-            if (bPickupEasingOut)
-            {
-                // Phase 1: decelerate to a stop along the spline.
-                // T goes 0->1 over PickupEaseOutDuration seconds.
-                // Ease-out shape: position advances quickly then slows — mirrors
-                // a power ramp where the derivative starts high and reaches zero.
-                float T = Math::Clamp((NormTime - PickupEaseStartElapsed) / PickupEaseOutDuration, 0.0, 1.0);
-                float EasedT = 1.0 - Math::Pow(1.0 - T, FPathProperties().EaseExponent);
-                float WorldDist = Math::Lerp(PickupEaseStartWorldDist, PickupEaseEndWorldDist, EasedT);
-
-                Owner.SetActorLocation(PathSpline.GetLocationAtDistanceAlongSpline(WorldDist, ESplineCoordinateSpace::World));
-
-                if (T >= 1.0)
-                    bPickupEasingOut = false;
-            }
-
-            // Logic for claiming Items
-
-            return;
-        }
-
-        // Normal movement — evaluate the main curve
-        float NormDist  = MovementCurve.GetFloatValue(NormTime);
+        float NormDist  = MovementCurve.GetFloatValue(CachedGameState.NormalizedTurnProgress - StoppedTimeEnd);
         float WorldDist = StartDistance + NormDist * SegmentLength;
 
         Owner.SetActorLocation(PathSpline.GetLocationAtDistanceAlongSpline(WorldDist, ESplineCoordinateSpace::World));
@@ -211,11 +153,10 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void PrecomputeMovementCurve()
     {
-        bCurveReady = false;
-
         if (PathSpline == nullptr)
         {
             Warning("TurnBasedMovementComponent: PathSpline is null.");
+            MovementState = EShipMovementState::NoPathDefined;
             return;
         }
 
@@ -223,68 +164,39 @@ class UTurnBasedMovementComponent : UActorComponent
         if (SegmentLength <= KINDA_SMALL_NUMBER)
         {
             Warning("TurnBasedMovementComponent: Segment length is zero or negative (" + SegmentLength + ").");
+            MovementState = EShipMovementState::NoPathDefined;
             return;
         }
 
-        Print(f"Current Nominal Speed: {SegmentLength / CachedGameState.TurnDuration} - Previous Nominal Speed: {OriginalNominalSpeed}", 2);
+        //Print(f"Current Nominal Speed: {SegmentLength / CachedGameState.TurnDuration} - Previous Nominal Speed: {OriginalNominalSpeed}", 2);
         FPathProperties Path;
         Path.EaseFraction = 0.1;
         Path.SampleInterval = 100;
         MovementCurve = UPathingUtils::GetMovementCurve2(PathSpline, StartDistance, SegmentLength, CachedGameState.TurnDuration, OriginalNominalSpeed, Path);
         //MovementCurve = UPathingUtils::GetMovementCurve(PathSpline, 0, 0, StartDistance, SegmentLength, FPathProperties());
 
-        bCurveReady = (MovementCurve != nullptr);
-    }
-
-    UFUNCTION()
-    void RecomputeMovementCurve(float EaseInDistance, float EaseOutDistance)
-    {
-        bCurveReady = false;
-
-        if (PathSpline == nullptr)
-        {
-            Warning("TurnBasedMovementComponent: PathSpline is null.");
-            return;
-        }
-
-        SegmentLength = EndDistance - StartDistance;
-        if (SegmentLength <= KINDA_SMALL_NUMBER)
-        {
-            Warning("TurnBasedMovementComponent: Segment length is zero or negative (" + SegmentLength + ").");
-            return;
-        }
-
-        Print(f"Current Nominal Speed: {SegmentLength / CachedGameState.TurnDuration} - Previous Nominal Speed: {OriginalNominalSpeed}", 2);
-        FPathProperties Path;
-        Path.EaseFraction = 0.1;
-        Path.SampleInterval = 100;
-        MovementCurve = UPathingUtils::GetMovementCurve(PathSpline, EaseInDistance, EaseOutDistance, StartDistance, SegmentLength, FPathProperties());
-
-        bCurveReady = (MovementCurve != nullptr);
+        MovementState = (MovementCurve == nullptr) ? EShipMovementState::NoPathDefined : MovementState;
     }
 
     UFUNCTION()
     void StartMovement()
     {
-        if (!bCurveReady || !HasPathDefined())
+        if (!HasPathDefined())
             return;
 
-        RemainingTurnDuration = CachedGameState.TurnDuration;
-        bIsMoving  = true;
+        MovementState = EShipMovementState::Moving; //watch out for frame 0 item pickup this could be set to stopped for pickup.
         SetComponentTickEnabled(true);
-        OriginalEndDistance  = EndDistance;
-        OriginalNominalSpeed = (RemainingTurnDuration > 0.0) ? (SegmentLength / RemainingTurnDuration) : 0.0;
-        bPickupEasingOut = false; // prevent easing out when it's happening cross-turns.
+        OriginalNominalSpeed = (CachedGameState.TurnDuration > 0.0) ? (SegmentLength / CachedGameState.TurnDuration) : 0.0;
         OriginalDirection = PathSpline.GetDirectionAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
+        StoppedTimeStart = 0.0;
+        StoppedTimeEnd = 0.0;
     }
 
     UFUNCTION()
     void StopMovement()
     {
-        bIsMoving = false;
+        MovementState = HasPathDefined() ? EShipMovementState::HasPathDefined : EShipMovementState::NoPathDefined;
         SetComponentTickEnabled(false);
-        if (bCurveReady)
-            Owner.SetActorLocation(PathSpline.GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World));
     }
 
     // ==================================================================
@@ -292,7 +204,7 @@ class UTurnBasedMovementComponent : UActorComponent
     //
     // Records the position and speed at the moment of stop — does NOT rebuild
     // the main MovementCurve or modify StartDistance / EndDistance /
-    // RemainingTurnDuration. The turn clock (ElapsedTime) keeps advancing
+    // CachedGameState.TurnDuration. The turn clock (ElapsedTime) keeps advancing
     // normally in tick, so time spent in the pickup state is naturally
     // deducted from the remaining budget. Tick overrides position logic while
     // bStoppedForPickup is true, performing the ease-out via direct position
@@ -308,42 +220,12 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void StopForPickup(bool bImmediateStop = false)
     {
-        if (!bIsMoving || bStoppedForPickup || !bCurveReady)
+        if (!IsMoving())
             return;
 
-        if (bImmediateStop)
-        {
-            bStoppedForPickup = true;
-            bPickupEasingOut  = false;
-            PickupEaseStartWorldDist = 0.0;
-            PickupEaseEndWorldDist   = 0.0;
-            PickupEaseStartElapsed   = 0.0;
-            PickupEaseOutDuration    = 0.0;
-            OriginalEndDistance      = EndDistance;
-            return;
-        }
+        StoppedTimeStart = CachedGameState.NormalizedTurnProgress;
 
-        // Sample exact current position off the curve, not a fixed start point.
-        // This handles being called mid-ease-in from a previous Resume.
-        PickupEaseStartWorldDist = StartDistance + MovementCurve.GetFloatValue(CachedGameState.NormalizedTurnProgress) * SegmentLength;
-        PickupEaseStartElapsed   = CachedGameState.GetElapsedTime();
-        OriginalEndDistance      = EndDistance;
-
-        // Derive ease-out duration from actual current speed, not nominal speed.
-        // If the ship is mid-ease-in it will be slower than full speed, so the
-        // stop distance and time are proportionally shorter — no jerk.
-        float ActualSpeed = GetCurrentSpeed();
-        PickupEaseOutDuration = (ActualSpeed > KINDA_SMALL_NUMBER)
-            ? (PickupEaseDistance * (ActualSpeed / Math::Max(OriginalNominalSpeed, 1.0))) / ActualSpeed
-            : 0.0;
-
-        // Ease travels proportionally less distance if ship is already slow.
-        float SpeedRatio     = (OriginalNominalSpeed > 0.0) ? Math::Clamp(ActualSpeed / OriginalNominalSpeed, 0.0, 1.0) : 0.0;
-        float ActualEaseDist = PickupEaseDistance * SpeedRatio;
-        PickupEaseEndWorldDist = Math::Min(PickupEaseStartWorldDist + ActualEaseDist, OriginalEndDistance);
-
-        bStoppedForPickup = true;
-        bPickupEasingOut  = PickupEaseOutDuration > KINDA_SMALL_NUMBER;
+        MovementState = EShipMovementState::StoppedForPickup;
     }
 
     /**
@@ -356,48 +238,12 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void ResumeFromPickup()
     {
-        if (!bStoppedForPickup)
+        if (!IsStoppedForPickup())
             return;
 
-        bStoppedForPickup = false;
-        bPickupEasingOut  = false;
+        StoppedTimeEnd = StoppedTimeEnd + CachedGameState.NormalizedTurnProgress - StoppedTimeStart;
 
-        float ElapsedTime = CachedGameState.GetElapsedTime();
-        float RemainingTime  = RemainingTurnDuration - ElapsedTime;
-        float PenaltyDuration = ElapsedTime - PickupEaseStartElapsed;
-
-        if (RemainingTime <= KINDA_SMALL_NUMBER)
-        {
-            // Budget exhausted — end the turn at the stop position
-            EndDistance = PickupEaseEndWorldDist;
-            bIsMoving   = false;
-            SetComponentTickEnabled(false);
-            OnPenaltyApplied.Broadcast(PenaltyDuration, EndDistance);
-            OnMovementComplete.Broadcast();
-            return;
-        }
-
-        // Where would the ship be on the ORIGINAL curve if it had kept moving?
-        // PickupEaseStartElapsed = when the stop was triggered.
-        // RemainingTime          = budget left after the penalty.
-        // Their sum is the point in the original turn timeline we'd have reached.
-        // Evaluating the original MovementCurve (still intact at this point) gives
-        // exactly the right endpoint — consistent with the original speed profile.
-        float NewEndNormTime = Math::Clamp((PickupEaseStartElapsed + RemainingTime) / RemainingTurnDuration, 0.0, 1.0);
-        float NewEndDistance = Math::Min(StartDistance + MovementCurve.GetFloatValue(NewEndNormTime) * SegmentLength, OriginalEndDistance);
-
-        // Rebuild the curve: stop position -> new endpoint, with ease-in.
-        // Reset elapsed time to 0 for the new curve — remaining budget becomes
-        // the new RemainingTurnDuration.
-        StartDistance = PickupEaseEndWorldDist;
-        EndDistance   = NewEndDistance;
-        RemainingTurnDuration = RemainingTime;
-        ElapsedTime   = 0.0;
-
-        RecomputeMovementCurve(PickupEaseDistance, 0);
-
-        SetComponentTickEnabled(true);
-        OnPenaltyApplied.Broadcast(PenaltyDuration, NewEndDistance);
+        MovementState = EShipMovementState::Moving;
     }
 
     // ==================================================================
@@ -407,7 +253,7 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION(BlueprintPure)
     bool IsMoving() const
     {
-        return bIsMoving;
+        return MovementState == EShipMovementState::Moving;
     }
 
     UFUNCTION()
@@ -419,7 +265,7 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION(BlueprintPure)
     bool IsStoppedForPickup() const
     {
-        return bStoppedForPickup;
+        return MovementState == EShipMovementState::StoppedForPickup;
     }
 
     float GetOriginalNominalSpeed() const
@@ -436,10 +282,10 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     float GetCurrentSpeed() const
     {
-        if (!bIsMoving || !bCurveReady || SegmentLength <= 0.0 || RemainingTurnDuration <= 0.0)
+        if (MovementState != EShipMovementState::Moving || SegmentLength <= 0.0 || CachedGameState.TurnDuration <= 0.0)
             return 0.0;
 
-        return UPathingUtils::EvalCurveDerivative(MovementCurve, CachedGameState.NormalizedTurnProgress) * (SegmentLength / RemainingTurnDuration);
+        return UPathingUtils::EvalCurveDerivative(MovementCurve, CachedGameState.NormalizedTurnProgress) * (SegmentLength / CachedGameState.TurnDuration);
     }
 
     // ==================================================================
@@ -510,6 +356,7 @@ class UTurnBasedMovementComponent : UActorComponent
         EndDistance   = 0.0;
         CheckpointDistances.Empty();
         OriginalDirection = FVector::ZeroVector;
+        MovementState = EShipMovementState::NoPathDefined;
     }
 
     UFUNCTION()
@@ -565,7 +412,7 @@ class UTurnBasedMovementComponent : UActorComponent
         if (PathSpline == nullptr || Owner == nullptr)
             return false;
 
-        if (bIsMoving)
+        if (MovementState == EShipMovementState::Moving)
         {
             float SampleDist = Math::Max(0.0, EndDistance - 0.1);
             FVector EndPoint = PathSpline.GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
