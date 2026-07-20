@@ -63,6 +63,13 @@ class ATopDown_GameState : AGameStateBase
         }*/
     }
 
+    //Returns real time seconds elapsed after turn start
+    UFUNCTION(BlueprintPure)
+    float GetElapsedTime()
+    {
+        return System::GetTimerElapsedTimeHandle(TurnTimer);
+    }
+
     UFUNCTION()
     void TogglePause(bool&out bIsQueuePaused)
     {

@@ -1,6 +1,5 @@
 event void FOnMovementComplete2();
 event void FOnPenaltyApplied2(float PenaltyDuration, float NewEndDistance);
-event void FOnShipRotated(FVector DestinationLocation);
 
 /**
  * Drives an actor along a USplineComponent over a fixed duration, guaranteeing
@@ -53,7 +52,6 @@ class UTurnBasedMovementComponent : UActorComponent
 {
     UPROPERTY() FOnMovementComplete2 OnMovementComplete;
     UPROPERTY() FOnPenaltyApplied2 OnPenaltyApplied;
-    UPROPERTY() FOnShipRotated OnShipRotated;
 
     UPROPERTY() TArray<float32> CheckpointDistances;
     UPROPERTY() float CurrentSpeed = 5000.0;
@@ -118,7 +116,7 @@ class UTurnBasedMovementComponent : UActorComponent
                 // T goes 0->1 over PickupEaseOutDuration seconds.
                 // Ease-out shape: position advances quickly then slows — mirrors
                 // a power ramp where the derivative starts high and reaches zero.
-                float T = Math::Clamp((CachedGameState.NormalizedTurnProgress - PickupEaseStartElapsed) / PickupEaseOutDuration, 0.0, 1.0);
+                float T = Math::Clamp((CachedGameState.GetElapsedTime() - PickupEaseStartElapsed) / PickupEaseOutDuration, 0.0, 1.0);
                 float EasedT = 1.0 - Math::Pow(1.0 - T, FPathProperties().EaseExponent);
                 float WorldDist = Math::Lerp(PickupEaseStartWorldDist, PickupEaseEndWorldDist, EasedT);
 
@@ -230,10 +228,37 @@ class UTurnBasedMovementComponent : UActorComponent
 
         Print(f"Current Nominal Speed: {SegmentLength / CachedGameState.TurnDuration} - Previous Nominal Speed: {OriginalNominalSpeed}", 2);
         FPathProperties Path;
-        Path.EaseFraction = 0.05;
+        Path.EaseFraction = 0.1;
         Path.SampleInterval = 100;
         MovementCurve = UPathingUtils::GetMovementCurve2(PathSpline, StartDistance, SegmentLength, CachedGameState.TurnDuration, OriginalNominalSpeed, Path);
         //MovementCurve = UPathingUtils::GetMovementCurve(PathSpline, 0, 0, StartDistance, SegmentLength, FPathProperties());
+
+        bCurveReady = (MovementCurve != nullptr);
+    }
+
+    UFUNCTION()
+    void RecomputeMovementCurve(float EaseInDistance, float EaseOutDistance)
+    {
+        bCurveReady = false;
+
+        if (PathSpline == nullptr)
+        {
+            Warning("TurnBasedMovementComponent: PathSpline is null.");
+            return;
+        }
+
+        SegmentLength = EndDistance - StartDistance;
+        if (SegmentLength <= KINDA_SMALL_NUMBER)
+        {
+            Warning("TurnBasedMovementComponent: Segment length is zero or negative (" + SegmentLength + ").");
+            return;
+        }
+
+        Print(f"Current Nominal Speed: {SegmentLength / CachedGameState.TurnDuration} - Previous Nominal Speed: {OriginalNominalSpeed}", 2);
+        FPathProperties Path;
+        Path.EaseFraction = 0.1;
+        Path.SampleInterval = 100;
+        MovementCurve = UPathingUtils::GetMovementCurve(PathSpline, EaseInDistance, EaseOutDistance, StartDistance, SegmentLength, FPathProperties());
 
         bCurveReady = (MovementCurve != nullptr);
     }
@@ -300,8 +325,8 @@ class UTurnBasedMovementComponent : UActorComponent
 
         // Sample exact current position off the curve, not a fixed start point.
         // This handles being called mid-ease-in from a previous Resume.
-        PickupEaseStartWorldDist = StartDistance + CachedGameState.NormalizedTurnProgress * SegmentLength;
-        PickupEaseStartElapsed   = CachedGameState.NormalizedTurnProgress * CachedGameState.TurnDuration;
+        PickupEaseStartWorldDist = StartDistance + MovementCurve.GetFloatValue(CachedGameState.NormalizedTurnProgress) * SegmentLength;
+        PickupEaseStartElapsed   = CachedGameState.GetElapsedTime();
         OriginalEndDistance      = EndDistance;
 
         // Derive ease-out duration from actual current speed, not nominal speed.
@@ -337,7 +362,7 @@ class UTurnBasedMovementComponent : UActorComponent
         bStoppedForPickup = false;
         bPickupEasingOut  = false;
 
-        float ElapsedTime = CachedGameState.NormalizedTurnProgress * CachedGameState.TurnDuration;
+        float ElapsedTime = CachedGameState.GetElapsedTime();
         float RemainingTime  = RemainingTurnDuration - ElapsedTime;
         float PenaltyDuration = ElapsedTime - PickupEaseStartElapsed;
 
@@ -369,7 +394,7 @@ class UTurnBasedMovementComponent : UActorComponent
         RemainingTurnDuration = RemainingTime;
         ElapsedTime   = 0.0;
 
-        PrecomputeMovementCurve();
+        RecomputeMovementCurve(PickupEaseDistance, 0);
 
         SetComponentTickEnabled(true);
         OnPenaltyApplied.Broadcast(PenaltyDuration, NewEndDistance);
@@ -379,7 +404,7 @@ class UTurnBasedMovementComponent : UActorComponent
     // Queries
     // ==================================================================
 
-    UFUNCTION()
+    UFUNCTION(BlueprintPure)
     bool IsMoving() const
     {
         return bIsMoving;

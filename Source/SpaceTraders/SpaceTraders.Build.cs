@@ -8,7 +8,7 @@ public class SpaceTraders : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "BetterHomingProjectiles", "SixDOFMovement" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "GameplayTags", "BetterHomingProjectiles", "SixDOFMovement" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

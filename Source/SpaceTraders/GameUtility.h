@@ -145,4 +145,7 @@ public:
 	DECLARE_FUNCTION(execGetNRandomItems);
 
 	static void GenericGetNRandomItems(void* TargetArrayAddr, const FArrayProperty* TargetArrayProperty, int32 NumberToGet, void* OutArrayAddr, const FArrayProperty* OutArrayProperty);
+	
+	UFUNCTION(BlueprintCallable, meta = (DeterminesOutputType = "FragmentType"))
+	static const UItemFragment* GetItemFragment(TArray<UItemFragment*> Fragments, const TSubclassOf<UItemFragment>& FragmentType);
 };

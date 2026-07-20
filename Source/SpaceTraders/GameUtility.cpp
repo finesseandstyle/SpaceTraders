@@ -12,6 +12,7 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "StructUtils/InstancedStruct.h"
 #include "GameFramework/Pawn.h"
+#include "Item.h"
 
 //Implementation: https://forums.unrealengine.com/t/project-world-to-screen-location-stops-returning-a-value/57135/11
 //Credit to Branden Marais
@@ -571,6 +572,20 @@ DEFINE_FUNCTION(UGameUtility::execGetNRandomItems)
         // Since we know this is an int32 array, we can cast and assign
         *(int32*)(IndicesHelper.GetRawPtr(NewIdxIdx)) = TempIndices[i];
     }
+}
+
+const UItemFragment* UGameUtility::GetItemFragment(TArray<UItemFragment*> Fragments,
+	const TSubclassOf<UItemFragment>& FragmentType)
+{
+	for (const auto Fragment : Fragments)
+	{
+		if (Fragment && Fragment->IsA(FragmentType))
+		{
+			return Fragment;
+		}
+	}
+
+	return nullptr;
 }
 
 // Keep the stub empty since CustomThunk uses execGetNRandomItems

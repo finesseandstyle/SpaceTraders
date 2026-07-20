@@ -63,6 +63,7 @@ namespace GameMath
         return (EndLocation - StartLocation).GetSafeNormal() * Extension + StartLocation;
     }
 
+    //Returns the mouse location of the playfield ignoring every game object in the way
     UFUNCTION()
     bool GetPlayfieldLocation (APlayerController PlayerController, FVector&out PlayfieldLocation)
     {
@@ -73,15 +74,15 @@ namespace GameMath
     }
 
     //no ufunction for you cause FCollisionQueryParams can't be exposed
-    bool GetObjectAtCursorLocation (FVector& PlayfieldLocation, FCollisionQueryParams& Params, AActor&out HoveredActor)
+    bool GetObjectAtCursorLocation (FVector& PlayfieldLocation, FCollisionQueryParams& Params, AGameObject&out HoveredActor)
     {
         FVector CameraLoc = Gameplay::GetPlayerCameraManager(0).CameraLocation;
         FVector ProjectedLoc = ExtendPath(CameraLoc, PlayfieldLocation, 1000000);
         FHitResult Out;
 
         System::LineTraceSingleByChannel(Out, CameraLoc, ProjectedLoc, ECollisionChannel::Visibility, Params);
-        
-        HoveredActor = Out.GetActor();
+        //Print(f"{System::GetDisplayName(Out.GetActor())}", 0);
+        HoveredActor = Cast<AGameObject>(Out.GetActor());
         return Out.bBlockingHit;
     }
 

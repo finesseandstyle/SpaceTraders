@@ -1,12 +1,13 @@
 //Ideally create a few more like: On Landable Object, On Ship, On Loot
 enum EInteractionResult {
         Invalid,
-        OnActor,
         OnPlayfield,
         OnSelf,
         OnPlanet,
         OnStation,
-        OnLoot
+        OnLoot,
+        OnSpaceship,
+        OnAsteroid
 }
 
 enum EPathingClickType {
@@ -32,10 +33,10 @@ class UTopDownPlannerComponent : UActorComponent
     UPROPERTY() FVector PlayfieldLocation;
     UPROPERTY() FVector ScrollingLocation;
     
-    UPROPERTY() AActor SelectedObject;
-    UPROPERTY() AActor HoveredObject;
+    UPROPERTY() AGameObject SelectedObject;
+    UPROPERTY() AGameObject HoveredObject;
 
-    UPROPERTY() AActor PlayerShip;
+    UPROPERTY() AGameObject PlayerShip;
     UPROPERTY() UTurnBasedMovementComponent MoveComp;
 
     UPROPERTY() TArray<AActor> ActorsToIgnore; //Playfield and any helper actors that should not obstruct hovering
@@ -71,15 +72,16 @@ class UTopDownPlannerComponent : UActorComponent
         }
         //SetTickGroup(ETickingGroup::TG_PostPhysics);
         TurnMarker.SetActorHiddenInGame(true);
-        MoveComp = PlayerShip.GetComponentByClass(UTurnBasedMovementComponent);
+        MoveComp = PlayerShip.GetComponentByClass(UTurnBasedMovementComponent); 
     }
 
     UFUNCTION(BlueprintOverride)
     void Tick(float DeltaSeconds)
     {
         bHasResult = GameMath::GetPlayfieldLocation(Gameplay::GetPlayerController(0), PlayfieldLocation);
+        
         GameMath::GetObjectAtCursorLocation(PlayfieldLocation, Params, HoveredObject);
-        Print(f"{System::GetDisplayName(HoveredObject)}", 0);
+            //Print(f"{HoveredObject.ObjectType.TagName}", 0);
     }
 
     UFUNCTION()
@@ -93,7 +95,20 @@ class UTopDownPlannerComponent : UActorComponent
         if (HoveredObject == PlayerShip)
             return EInteractionResult::OnSelf;
 
-        return EInteractionResult::OnActor;
+        if (HoveredObject.ObjectType == GameplayTags::GameObject_Ship)
+            return EInteractionResult::OnSpaceship;
+
+        if (HoveredObject.ObjectType == GameplayTags::GameObject_InhabitedPlanet || 
+        HoveredObject.ObjectType == GameplayTags::GameObject_UninhabitedPlanet)
+            return EInteractionResult::OnPlanet;
+
+        if (HoveredObject.ObjectType == GameplayTags::GameObject_Asteroid)
+            return EInteractionResult::OnAsteroid;
+
+        if (HoveredObject.ObjectType == GameplayTags::GameObject_Loot)
+            return EInteractionResult::OnLoot;
+
+        return EInteractionResult::Invalid;
     }
 
     UFUNCTION()

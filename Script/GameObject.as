@@ -4,10 +4,7 @@ class AGameObject : APawn
     USphereComponent Sphere;
     default Sphere.SphereRadius = 120;
 
-    UPROPERTY()
-    UShipStateComponent ShipState;
-
-    UPROPERTY(ExposeOnSpawn)
+    UPROPERTY()//ExposeOnSpawn)
     FGameplayTag ObjectType = GameplayTags::GameObject_Ship;
     
     UPROPERTY(ExposeOnSpawn)
