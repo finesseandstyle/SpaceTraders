@@ -668,6 +668,11 @@ class UTurnBasedMovementComponent : UActorComponent
         PickupTargets.Empty();
     }
 
+    private FVector GetItemLocation(AActor ItemActor)
+    {
+        return FVector(ItemActor.GetActorLocation().X, ItemActor.GetActorLocation().Y, ZLevel);
+    }
+
     UFUNCTION(BlueprintCallable, Category = "Pickup")
     void PlanCollectionStops(const TArray<AActor>& CandidateItems, bool& bImmediatePickup)
     {
@@ -683,8 +688,9 @@ class UTurnBasedMovementComponent : UActorComponent
             {
                 if (Item == nullptr) continue;
 
-                float DistAtClosest = GetClosestSplineDist(Item.GetActorLocation());
-                float ActualDist = Item.GetActorLocation().Distance(PathSpline.GetLocationAtDistanceAlongSpline(DistAtClosest, ESplineCoordinateSpace::World));
+                FVector ItemLoc = GetItemLocation(Item);
+                float DistAtClosest = GetClosestSplineDist(ItemLoc);
+                float ActualDist = ItemLoc.Distance(PathSpline.GetLocationAtDistanceAlongSpline(DistAtClosest, ESplineCoordinateSpace::World));
 
                 if (ActualDist <= TractorBeamRadius)
                 {
@@ -729,7 +735,7 @@ class UTurnBasedMovementComponent : UActorComponent
                     bool bWindowsOverlap = (NextEnt <= NextExt);
 
                     // OptLSpan calculation relative to cluster head
-                    float GroupStartOptDist = GetClosestSplineDist(CurrentStop.PendingItems[0].GetActorLocation());
+                    float GroupStartOptDist = GetClosestSplineDist(GetItemLocation(CurrentStop.PendingItems[0]));
                     float OptLSpan = Win.OptDist - GroupStartOptDist;
 
                     if (bWindowsOverlap && (OptLSpan <= DynamicMaxSpan))
@@ -875,7 +881,7 @@ class UTurnBasedMovementComponent : UActorComponent
             ULootComponent PickupComp = CandidateItem.GetComponentByClass(ULootComponent);
             if (PickupComp != nullptr && PickupComp.bCanBePickedUp && !PickupComp.IsCollected())
             {
-                float Dist = CandidateItem.GetActorLocation().Distance(ShipLoc);
+                float Dist = GetItemLocation(CandidateItem).Distance(ShipLoc);
                 float Score = (Dist > 0.1) ? (TractorBeamPullSpeed / (Dist * Dist)) : TractorBeamPullSpeed;
 
                 if (PickupComp.TryClaimAsPuller(Owner, Score))

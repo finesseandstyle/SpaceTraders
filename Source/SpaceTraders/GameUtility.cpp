@@ -436,8 +436,8 @@ float UGameUtility::RandomNormal(float Min, float Max)
 void UGameUtility::SortActorsOnDistance(TArray<AActor*>& Actors, FVector Location)
 {
 	Actors.Sort([&](const AActor& A, const AActor& B) {
-				float DistA = FVector::DistSquared(Location, A.GetActorLocation());
-				float DistB = FVector::DistSquared(Location, B.GetActorLocation());
+				float DistA = FVector::DistSquaredXY(Location, A.GetActorLocation());
+				float DistB = FVector::DistSquaredXY(Location, B.GetActorLocation());
 				return DistA > DistB;
 	});
 }

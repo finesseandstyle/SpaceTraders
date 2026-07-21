@@ -78,31 +78,32 @@ class ULootComponent : UActorComponent
         if (MovingShip == nullptr || CurrentPuller != MovingShip || bIsCollected || !bCanBePickedUp)
             return false;
 
-        
         AActor OwnerActor = GetOwner();
         if (OwnerActor == nullptr)
             return false;
 
         const FVector ItemLocation = OwnerActor.GetActorLocation();
-        const FVector Direction = (ShipLocation - ItemLocation).GetSafeNormal();
-        const float DistToShip = ItemLocation.Distance(ShipLocation);
 
-        // Calculate a full, raw step based purely on velocity and time
-        const float FullStep = PullSpeed * DeltaTime;
+        // Calculate full 3D vector and 2D ground distance
+        const FVector FullVector = ShipLocation - ItemLocation;
+        const float Dist2D = FVector2D(ItemLocation.X, ItemLocation.Y).Distance(FVector2D(ShipLocation.X, ShipLocation.Y));
 
-        // Determine the distance remaining until reaching the boundary
-        const float DistanceToBoundary = DistToShip - SnapCollectRadius;
+        const float FullStep2D = PullSpeed * DeltaTime;
+        const float DistanceToBoundary = Dist2D - SnapCollectRadius;
 
-        // If our full frame step is going to match or exceed the boundary gap,
-        // we bypass subtraction completely, snap it directly to the radius boundary, and collect.
-        if (FullStep >= DistanceToBoundary)
+        if (FullStep2D >= DistanceToBoundary)
         {
             MarkCollected(MovingShip);
             return true;
         }
 
-        // Otherwise, we are safely far away; take a normal step
-        OwnerActor.SetActorLocation(ItemLocation + Direction * FullStep);
+        // Scale 3D vector by the 2D step ratio so ground speed stays identical
+        if (Dist2D > 0.001f)
+        {
+            const FVector StepVector = (FullVector / Dist2D) * FullStep2D;
+            OwnerActor.SetActorLocation(ItemLocation + StepVector);
+        }
+
         return false;
     }
 
