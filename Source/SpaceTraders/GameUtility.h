@@ -107,8 +107,11 @@ public:
 	 */
 	UFUNCTION(BlueprintPure, Category="Math|Random")
 	static float RandomNormal(float Min = 0.f, float Max = 1.f);
-
 	
+	UFUNCTION(BlueprintCallable)
+	static void SortActorsOnDistance(TArray<AActor*>& Actors, FVector Location);
+
+
 	/**
 	 * Checks if a string consists strictly of digits (0-9).
 	 * Returns false for decimals, spaces, negative signs, or empty strings.

@@ -22,7 +22,7 @@ class ULootComponent : UActorComponent
     // Internal State
     // -------------------------------------------------------------------------
 
-    private AGameObject CurrentPuller = nullptr;
+    private AActor CurrentPuller = nullptr;
     private float CurrentPullerScore = -1.0;
     private bool bIsCollected = false;
 
@@ -32,7 +32,7 @@ class ULootComponent : UActorComponent
     // Contention API
     // -------------------------------------------------------------------------
 
-    bool TryClaimAsPuller(AGameObject BiddingShip, const float Score)
+    bool TryClaimAsPuller(AActor BiddingShip, const float Score)
     {
         if (!bCanBePickedUp || bIsCollected || BiddingShip == nullptr)
             return false;
@@ -60,7 +60,7 @@ class ULootComponent : UActorComponent
         return false;
     }
 
-    void ReleasePullerClaim(AGameObject ReleasingShip)
+    void ReleasePullerClaim(AActor ReleasingShip)
     {
         if (CurrentPuller == ReleasingShip)
         {
@@ -73,7 +73,7 @@ class ULootComponent : UActorComponent
      * Move this item toward ShipLocation. Only executes for the current puller.
      * Calls MarkCollected() and returns true when SnapCollectRadius is reached.
      */
-    bool UpdatePullMovement(AGameObject MovingShip, const FVector& ShipLocation, const float PullSpeed, const float DeltaTime)
+    bool UpdatePullMovement(AActor MovingShip, const FVector& ShipLocation, const float PullSpeed, const float DeltaTime)
     {
         if (MovingShip == nullptr || CurrentPuller != MovingShip || bIsCollected || !bCanBePickedUp)
             return false;
@@ -107,7 +107,7 @@ class ULootComponent : UActorComponent
     }
 
     UFUNCTION()
-    void MarkCollected(AGameObject CollectingShip)
+    void MarkCollected(AActor CollectingShip)
     {
         if (bIsCollected)
             return;
@@ -138,7 +138,7 @@ class ULootComponent : UActorComponent
     }
 
     UFUNCTION()
-    AGameObject GetCurrentPuller() const
+    AActor GetCurrentPuller() const
     {
         return CurrentPuller;
     }

@@ -101,7 +101,8 @@ class ATopDown_GameState : AGameStateBase
             
             for (AGameObject GameObject : GameObjects)
             {
-                GameObject.TurnResume();
+                if (GameObject != nullptr) //Dirty fix for destroyed objects not updating the array
+                    GameObject.TurnResume();
             }
             OnTurnResume.Broadcast();
             HandleTurn();

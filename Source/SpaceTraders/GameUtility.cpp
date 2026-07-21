@@ -433,6 +433,15 @@ float UGameUtility::RandomNormal(float Min, float Max)
 	return FMath::Lerp(Min, Max, (FMath::FRand() + FMath::FRand() + FMath::FRand()) / 3);
 }
 
+void UGameUtility::SortActorsOnDistance(TArray<AActor*>& Actors, FVector Location)
+{
+	Actors.Sort([&](const AActor& A, const AActor& B) {
+				float DistA = FVector::DistSquared(Location, A.GetActorLocation());
+				float DistB = FVector::DistSquared(Location, B.GetActorLocation());
+				return DistA > DistB;
+	});
+}
+
 bool UGameUtility::IsInteger(const FString& SourceString)
 {
 	if (SourceString.IsEmpty())

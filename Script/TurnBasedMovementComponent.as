@@ -1,33 +1,41 @@
-/**
- * Drives an actor along a USplineComponent over a fixed duration, guaranteeing
- * checkpoint arrival regardless of speed variation along the path.
- *
- * HOW IT WORKS (Time Remapping):
- *   UPathingUtils::GetMovementCurve() samples curvature at evenly-spaced
- *   world-distance intervals along [StartDistance, EndDistance], builds a
- *   speed-weight profile, integrates it into a cumulative-distance array, and
- *   pairs it with uniform time samples to produce a normTime -> normDist
- *   UCurveFloat (RCIM_Linear internally).
- *
- *   Runtime tick:
- *       normDist = GameState.NormalizedTurnProgress
- *       position = PathSpline.GetLocationAtDistanceAlongSpline(StartDistance + normDist * SegmentLength)
- *
- *   The curve always ends at (1,1) so checkpoint arrival is guaranteed.
- *
- * PICKUP STOPS:
- *   StopForPickup() eases the ship to a halt and begins accumulating stopped
- *   time. ResumeFromPickup() eases it back up to speed and rebuilds the curve
- *   so the new EndDistance reflects the time lost while stopped. The ship
- *   never jumps — it resumes from exactly where it stopped.
- *   If the turn ends while stopped, OnMovementComplete does NOT fire; the
- *   ship simply remains at its current position until the next turn.
- *
- * NETWORKING:
- *   Fully deterministic — same spline data produces the same curve on every
- *   client. No per-frame replication required.
- */
-UENUM()
+// TurnBasedMovementComponent.as
+//
+// Drives a ship along a USplineComponent for a WEGO turn-based game, and
+// owns its tractor-beam pickup behaviour along the way.
+
+// MOVEMENT
+//   Movement is driven externally: ATopDown_GameState exposes
+//   NormalizedTurnProgress (0..1 over TurnDuration), advanced by whatever
+//   owns turn playback — not by this component's own DeltaTime. Tick() just
+//   samples MovementCurve at the current progress and places the actor.
+//   PrecomputeMovementCurve() builds that curve via
+//   UPathingUtils::GetMovementCurve2(), blending from OriginalNominalSpeed —
+//   read BEFORE StartMovement() overwrites it with this turn's own nominal
+//   speed, so at precompute time it still holds LAST turn's speed. That's
+//   what gives continuous cross-turn acceleration/deceleration without a
+//   dedicated "previous speed" field.
+//
+//   Setup order per turn: SetNextPathSegment() -> PrecomputeMovementCurve()
+//   -> OnTurnStart() (which itself calls StartMovement() and plans any
+//   pickup stops). This component doesn't detect end-of-turn itself — no
+//   OnMovementComplete event — the external turn driver reaching
+//   NormalizedTurnProgress >= 1 is what ends a turn.
+//
+// PICKUP
+//   PlanCollectionStops() scans registered PickupTargets against the
+//   CURRENT path spline once per turn (from OnTurnStart()) and produces an
+//   ordered TArray<FStopEvent>, each a cluster of nearby items reachable
+//   from one stop point. While MovementState == StoppedForPickup, Tick()
+//   claims tractor-beam slots up to MaxSimultaneousPickups and pulls items
+//   in; normal spline sampling is skipped entirely. There's no easing to or
+//   from a pickup stop by design — the ship holds position exactly where it
+//   was, and resumes exactly where it left off: StoppedTimeEnd accumulates
+//   how much NormalizedTurnProgress elapsed while stopped and is subtracted
+//   back out when sampling the curve, so no curve rebuild is needed to
+//   "pause" it.
+
+event void FOnItemCollected(AActor CollectedItem, FGameItem Item);
+
 enum EShipMovementState
 {
     NoPathDefined,
@@ -40,21 +48,21 @@ struct FBeamState
 {
     AActor Item = nullptr;
     int32 BeamIndex = 0;
-};
+}
 
 struct FStopEvent
 {
     float StopDistance = 0.0;
     FVector StopLocation = FVector::ZeroVector;
     TArray<AActor> PendingItems;
-};
+}
 
 struct FTurnState
 {
     TArray<FBeamState> ActiveBeams;
     TArray<AActor> BeamQueue;
     TArray<FStopEvent> RemainingPlan;
-};
+}
 
 // Helper struct for internal calculation in PlanCollectionStops
 struct FItemWindow
@@ -63,13 +71,25 @@ struct FItemWindow
     float Entry;
     float Exit;
     float OptDist;
-};
+
+    int opCmp(const FItemWindow& Other) const
+    {
+        if (OptDist < Other.OptDist)
+            return -1;
+        if (OptDist > Other.OptDist)
+            return 1;
+        return 0;
+    }
+}
 
 UCLASS()
 class UTurnBasedMovementComponent : UActorComponent
 {
+    ATopDown_GameState CachedGameState;
 
-    // MOVEMENT
+    // ------------------------------------------------------------------
+    // Movement
+    // ------------------------------------------------------------------
     UPROPERTY() TArray<float32> CheckpointDistances;
     UPROPERTY() float CurrentSpeed = 5000.0;
     UPROPERTY() float ZLevel = 810.0;
@@ -79,20 +99,36 @@ class UTurnBasedMovementComponent : UActorComponent
     UPROPERTY() float EndDistance = 1000.0;
 
     UPROPERTY() EShipMovementState MovementState = EShipMovementState::NoPathDefined;
+    private EShipMovementState PreviousMovementState = EShipMovementState::NoPathDefined;
     private UCurveFloat MovementCurve; // normTime [0,1] -> normDist [0,1]
 
-    UPROPERTY() float OriginalNominalSpeed = 0.0; 
+    UPROPERTY() float OriginalNominalSpeed = 0.0;
     private float SegmentLength = 0.0;
     private float StoppedTimeStart, StoppedTimeEnd = 0;
-
-    // Pickup related things
     private FVector OriginalDirection = FVector::ZeroVector;
 
-    ATopDown_GameState CachedGameState; 
+    // ------------------------------------------------------------------
+    // Pickup
+    // ------------------------------------------------------------------
+    UPROPERTY()
+    FTurnState CurrentTurnState;
 
-    // PICKUPS
-    UPROPERTY() float TractorBeamRadius = 750.0;
-    UPROPERTY() float TractorBeamPullSpeed = 1000.0;
+    UPROPERTY(Category = "Pickup") float TractorBeamRadius = 1500.0;
+    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1000.0;
+    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 3;
+    UPROPERTY(Category = "Pickup") float ProximityAlpha = 0.4;
+
+    private TArray<AActor> PickupTargets;
+
+    // ------------------------------------------------------------------
+    // Events
+    // ------------------------------------------------------------------
+    UPROPERTY()
+    FOnItemCollected OnItemCollected;
+
+    // ==================================================================
+    // Engine lifecycle
+    // ==================================================================
 
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
@@ -109,20 +145,56 @@ class UTurnBasedMovementComponent : UActorComponent
 
         if (MovementState == EShipMovementState::StoppedForPickup)
         {
-            // Logic for claiming Items
+            TickPickup(DeltaSeconds);
             return;
         }
 
-        // Normal movement — evaluate the main curve
+        if (MovementState != EShipMovementState::Moving)
+            return;
+
+        // --- Position update ---
         float NormDist  = MovementCurve.GetFloatValue(CachedGameState.NormalizedTurnProgress - StoppedTimeEnd);
         float WorldDist = StartDistance + NormDist * SegmentLength;
-
         Owner.SetActorLocation(PathSpline.GetLocationAtDistanceAlongSpline(WorldDist, ESplineCoordinateSpace::World));
+
+        // --- Pickup: have we reached the next planned stop? ---
+        if (CurrentTurnState.RemainingPlan.IsValidIndex(0))
+        {
+            float CurrentSplineDist = PathSpline.GetDistanceAlongSplineAtLocation(Owner.ActorLocation, ESplineCoordinateSpace::World);
+            float TargetStopDist = CurrentTurnState.RemainingPlan[0].StopDistance;
+
+            const float ArrivalTolerance = 15.0;
+            if (Math::Abs(CurrentSplineDist - TargetStopDist) <= ArrivalTolerance || CurrentSplineDist >= TargetStopDist)
+            {
+                StopForPickup();
+                ExecuteNextStop();
+            }
+        }
+    }
+
+    // ==================================================================
+    // Turn lifecycle
+    // ==================================================================
+
+    UFUNCTION()
+    void OnTurnStart()
+    {
+        SetComponentTickEnabled(true);
+
+        bool bImmediatePickup = false;
+        PlanCollectionStops(PickupTargets, bImmediatePickup);
+
+        StartMovement();
+        if (bImmediatePickup)
+        {
+            StopForPickup(true);
+        }
     }
 
     UFUNCTION()
     bool SetNextPathSegment()
     {
+        if (PathSpline == nullptr) return false;
         if (HasPathDefined())
         {
             CheckpointDistances.Empty();
@@ -153,29 +225,17 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void PrecomputeMovementCurve()
     {
-        if (PathSpline == nullptr)
-        {
-            Warning("TurnBasedMovementComponent: PathSpline is null.");
-            MovementState = EShipMovementState::NoPathDefined;
-            return;
-        }
-
         SegmentLength = EndDistance - StartDistance;
         if (SegmentLength <= KINDA_SMALL_NUMBER)
         {
-            Warning("TurnBasedMovementComponent: Segment length is zero or negative (" + SegmentLength + ").");
             MovementState = EShipMovementState::NoPathDefined;
             return;
         }
 
-        //Print(f"Current Nominal Speed: {SegmentLength / CachedGameState.TurnDuration} - Previous Nominal Speed: {OriginalNominalSpeed}", 2);
         FPathProperties Path;
         Path.EaseFraction = 0.1;
         Path.SampleInterval = 100;
         MovementCurve = UPathingUtils::GetMovementCurve2(PathSpline, StartDistance, SegmentLength, CachedGameState.TurnDuration, OriginalNominalSpeed, Path);
-        //MovementCurve = UPathingUtils::GetMovementCurve(PathSpline, 0, 0, StartDistance, SegmentLength, FPathProperties());
-
-        MovementState = (MovementCurve == nullptr) ? EShipMovementState::NoPathDefined : MovementState;
     }
 
     UFUNCTION()
@@ -184,6 +244,7 @@ class UTurnBasedMovementComponent : UActorComponent
         if (!HasPathDefined())
             return;
 
+        PreviousMovementState = MovementState;
         MovementState = EShipMovementState::Moving; //watch out for frame 0 item pickup this could be set to stopped for pickup.
         SetComponentTickEnabled(true);
         OriginalNominalSpeed = (CachedGameState.TurnDuration > 0.0) ? (SegmentLength / CachedGameState.TurnDuration) : 0.0;
@@ -195,28 +256,12 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void StopMovement()
     {
+        PreviousMovementState = MovementState;
         MovementState = HasPathDefined() ? EShipMovementState::HasPathDefined : EShipMovementState::NoPathDefined;
+        
         SetComponentTickEnabled(false);
     }
 
-    // ==================================================================
-    // Pickup stops
-    //
-    // Records the position and speed at the moment of stop — does NOT rebuild
-    // the main MovementCurve or modify StartDistance / EndDistance /
-    // CachedGameState.TurnDuration. The turn clock (ElapsedTime) keeps advancing
-    // normally in tick, so time spent in the pickup state is naturally
-    // deducted from the remaining budget. Tick overrides position logic while
-    // bStoppedForPickup is true, performing the ease-out via direct position
-    // interpolation and then holding the ship still.
-    // ==================================================================
-
-    /**
-     * Eases the ship to a halt for a pickup. Call at any time during movement.
-     * Time spent stopped is deducted from the turn budget when ResumeFromPickup()
-     * is called, shortening the remaining path accordingly.
-     * No-op if already stopped or not currently moving.
-     */
     UFUNCTION()
     void StopForPickup(bool bImmediateStop = false)
     {
@@ -228,13 +273,6 @@ class UTurnBasedMovementComponent : UActorComponent
         MovementState = EShipMovementState::StoppedForPickup;
     }
 
-    /**
-     * Resumes movement after a StopForPickup(). Deducts the time spent stopped
-     * from the remaining budget, recomputes the new EndDistance, rebuilds the
-     * curve from the current position, and eases the ship back up to speed.
-     * Fires OnPenaltyApplied with the new EndDistance.
-     * No-op if not in a pickup stop.
-     */
     UFUNCTION()
     void ResumeFromPickup()
     {
@@ -256,16 +294,16 @@ class UTurnBasedMovementComponent : UActorComponent
         return MovementState == EShipMovementState::Moving;
     }
 
-    UFUNCTION()
-    int32 PathDurationInTurns() const
-    {
-        return CheckpointDistances.Num() - 1;
-    }
-
     UFUNCTION(BlueprintPure)
     bool IsStoppedForPickup() const
     {
         return MovementState == EShipMovementState::StoppedForPickup;
+    }
+
+    UFUNCTION()
+    int32 PathDurationInTurns() const
+    {
+        return CheckpointDistances.Num() - 1;
     }
 
     float GetOriginalNominalSpeed() const
@@ -279,13 +317,18 @@ class UTurnBasedMovementComponent : UActorComponent
         return CheckpointDistances.Num() >= 1 && CheckpointDistances.Last() - StartDistance > 1.0;
     }
 
-    UFUNCTION()
-    float GetCurrentSpeed() const
+    //Returns the world location of the current path's location at the end of the turn
+    UFUNCTION(BlueprintPure)
+    FVector GetPathEndOfTurnLocation()
     {
-        if (MovementState != EShipMovementState::Moving || SegmentLength <= 0.0 || CachedGameState.TurnDuration <= 0.0)
-            return 0.0;
+        return PathSpline.GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
+    }
 
-        return UPathingUtils::EvalCurveDerivative(MovementCurve, CachedGameState.NormalizedTurnProgress) * (SegmentLength / CachedGameState.TurnDuration);
+    UFUNCTION(BlueprintPure)
+    int GetPathDistance()
+    {
+        float ScaledDistance = Math::Min(PathSpline.GetSplineLength() - StartDistance, CurrentSpeed * CheckpointDistances.Num()) / 10.0;
+        return Math::RoundToInt(ScaledDistance);
     }
 
     // ==================================================================
@@ -311,7 +354,7 @@ class UTurnBasedMovementComponent : UActorComponent
         // All points are flattened to ZLevel so the path is always horizontal.
         FVector CurrentLocation = FVector(Owner.ActorLocation.X, Owner.ActorLocation.Y, ZLevel);
         FVector Destination     = FVector(DestinationLocation.X, DestinationLocation.Y, ZLevel);
-        FVector ForwardVector   = OriginalDirection != FVector::ZeroVector ? OriginalDirection   
+        FVector ForwardVector   = OriginalDirection != FVector::ZeroVector ? OriginalDirection
             : FVector(Owner.ActorForwardVector.X, Owner.ActorForwardVector.Y, 0.0).GetSafeNormal();
 
         UPathingUtils::CreateNewPath(PathSpline, CurrentLocation, ForwardVector, ZLevel, Destination, 400.0, FPathProperties(), CurrentSpeed);
@@ -337,16 +380,9 @@ class UTurnBasedMovementComponent : UActorComponent
         float ScaledDistance = Math::Min(PathSpline.GetSplineLength() - StartDistance, CurrentSpeed * CheckpointDistances.Num()) / 10.0;
         Distance = Math::RoundToInt(ScaledDistance);
         Days = PathDurationInTurns();
-        //Print(f"{CheckpointDistances.Num()}");
 
+        MovementState = EShipMovementState::HasPathDefined;
         return true;
-    }
-
-    UFUNCTION(BlueprintPure)
-    int GetPathDistance()
-    {
-        float ScaledDistance = Math::Min(PathSpline.GetSplineLength() - StartDistance, CurrentSpeed * CheckpointDistances.Num()) / 10.0;
-        return Math::RoundToInt(ScaledDistance);
     }
 
     UFUNCTION()
@@ -405,10 +441,6 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     bool QueuePathMidTurn(FVector DestinationLocation, FVector &out AdjustedLocation, int&out Distance, int&out Days)
     {
-        //AdjustedLocation = FVector::ZeroVector;
-        //Distance = 0;
-        //Days = 0;
-
         if (PathSpline == nullptr || Owner == nullptr)
             return false;
 
@@ -418,30 +450,6 @@ class UTurnBasedMovementComponent : UActorComponent
             FVector EndPoint = PathSpline.GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
             FVector ForwardVector = PathSpline.GetDirectionAtDistanceAlongSpline(SampleDist, ESplineCoordinateSpace::World);
             FVector Destination = FVector(DestinationLocation.X, DestinationLocation.Y, ZLevel);
-            
-            /*
-            int32 LastSurvivingIdx = PathSpline.GetNumberOfSplinePoints() - 1;
-            while (LastSurvivingIdx > 0 && PathSpline.GetDistanceAlongSplineAtSplinePoint(LastSurvivingIdx) > EndDistance + 0.5f)
-            {
-                LastSurvivingIdx--;
-            }
-            int32 ArcPhase = LastSurvivingIdx % 3; // 0: only ArcStart survives, 1: ArcStart+Mid survive, 2: in the straight run — nothing to fix
-
-            FVector CurvaturePos = FVector::ZeroVector;
-            FVector CurvatureTangent = FVector::ZeroVector;
-            if (ArcPhase == 0)
-            {
-                // Only the arc's start point survives. Sample the TRUE curve shape at the
-                // cut now — once we truncate, there's nothing left past ArcStart to
-                // interpolate against, so this has to happen before that loop runs.
-                FVector ArcStartLoc  = PathSpline.GetLocationAtSplinePoint(LastSurvivingIdx, ESplineCoordinateSpace::World);
-                float   ArcStartDist = PathSpline.GetDistanceAlongSplineAtSplinePoint(LastSurvivingIdx);
-                float   ArcSampleDist   = (ArcStartDist + EndDistance) * 0.5;
-
-                CurvaturePos = PathSpline.GetLocationAtDistanceAlongSpline(ArcSampleDist, ESplineCoordinateSpace::World);
-                CurvatureTangent = PathSpline.GetDirectionAtDistanceAlongSpline(ArcSampleDist, ESplineCoordinateSpace::World)
-                                    * ArcStartLoc.Distance(EndPoint) * 0.5;
-            }*/
 
             // 1. TRUNCATE FIRST
             for (int i = PathSpline.GetNumberOfSplinePoints() - 1; i >= 0; i--)
@@ -466,8 +474,6 @@ class UTurnBasedMovementComponent : UActorComponent
             {
                 PathSpline.SetLocationAtSplinePoint(AnchorIdx, EndPoint, ESplineCoordinateSpace::World, false);
             }
-
-
 
             // 3. FIX THE "HANDOVER" SEGMENT (Point before Anchor -> Anchor)
             if (AnchorIdx > 0)
@@ -514,7 +520,7 @@ class UTurnBasedMovementComponent : UActorComponent
             {
                 CheckpointDistances.Add(PathLength);
             }
-            
+
             AdjustedLocation = PathSpline.GetLocationAtDistanceAlongSpline(PathSpline.GetSplineLength(), ESplineCoordinateSpace::World);
             float RemainingLen = PathSpline.GetSplineLength() - EndDistance;
             Distance = Math::RoundToInt(RemainingLen / 10.0);
@@ -559,7 +565,6 @@ class UTurnBasedMovementComponent : UActorComponent
 
         PathSpline.UpdateSpline();
 
-        // --- FINALIZE ---
         float PathLength = PathSpline.GetSplineLength();
         CheckpointDistances.Empty();
         StartDistance = 0.0;
@@ -581,6 +586,7 @@ class UTurnBasedMovementComponent : UActorComponent
         Distance = Math::RoundToInt(ScaledDistance);
         Days = Math::CeilToInt((float(Distance) - 1.0) / (CurrentSpeed / 10.0));
 
+        MovementState = EShipMovementState::HasPathDefined;
         return true;
     }
 
@@ -588,27 +594,27 @@ class UTurnBasedMovementComponent : UActorComponent
     {
         if (PathSpline == nullptr || Owner == nullptr)
                 return false;
-        
+
         const FVector CurrentLocation = PathSpline.GetLocationAtDistanceAlongSpline(PathSpline.GetSplineLength(), ESplineCoordinateSpace::World);
         const FVector Destination     = FVector(DestinationLocation.X, DestinationLocation.Y, ZLevel);
         const FVector ForwardVector   = PathSpline.GetDirectionAtDistanceAlongSpline(PathSpline.GetSplineLength(), ESplineCoordinateSpace::World);
-        
+
         //2xMaxR is the minimum distance required for a new waypoint
         if (!(DestinationLocation.Distance(CurrentLocation) * 0.5f > FPathProperties().DubinsTurnRadius + CurrentSpeed / 50.f))
             return false;
-        
+
         bool AdjustedPath = UPathingUtils::AddPointsToPath(PathSpline, CurrentLocation, ForwardVector, Destination, 400, EndDistance, ZLevel, CurrentSpeed, FPathProperties());
         const float PathLength = PathSpline.GetSplineLength();
-        
+
         CheckpointDistances.Empty();
-        
+
         float CurrentDistance = PathSpline.GetDistanceAlongSplineAtLocation(GetOwner().ActorLocation, ESplineCoordinateSpace::World);
         CheckpointDistances.Add(CurrentDistance);
         for (float d = CurrentDistance + CurrentSpeed; d < PathSpline.GetSplineLength(); d += CurrentSpeed)
         {
             CheckpointDistances.Add(d);
         }
-        
+
         if (PathLength - CheckpointDistances.Last() > 10.f)
         {
             CheckpointDistances.Add(PathLength);
@@ -617,18 +623,379 @@ class UTurnBasedMovementComponent : UActorComponent
         const float ScaledDistance = Math::Min((PathSpline.GetSplineLength() - StartDistance), CurrentSpeed * CheckpointDistances.Num()) / 10.f;
         Distance = Math::RoundToInt(ScaledDistance);
         Days = PathDurationInTurns();
-        
+
         return true;
     }
 
-    //Returns the world location of the current path's location at the end of the turn
-    UFUNCTION(BlueprintPure)
-    FVector GetPathEndOfTurnLocation()
+    // ==================================================================
+    // Pickup target API
+    // ==================================================================
+
+    UFUNCTION(BlueprintCallable, Category = "Pickup")
+    void AddPickupTarget(AActor ItemActor)
     {
-        return PathSpline.GetLocationAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
+        if (ItemActor == nullptr)
+            return;
+
+        ULootComponent PC = ItemActor.GetComponentByClass(ULootComponent);
+        if (PC == nullptr || PC.IsCollected())
+            return;
+
+        if (PickupTargets.Contains(ItemActor))
+            return;
+
+        PickupTargets.Add(ItemActor);
+        PC.OnItemPickedUp.AddUFunction(this, n"HandleItemPickedUp");
+        ItemActor.OnDestroyed.AddUFunction(this, n"HandleItemDestroyed");
     }
 
-    //attempt to fix 
+    UFUNCTION(BlueprintCallable, Category = "Pickup")
+    void RemovePickupTarget(AActor ItemActor)
+    {
+        if (ItemActor != nullptr)
+            UnregisterTarget(ItemActor, true);
+    }
+
+    UFUNCTION(BlueprintCallable, Category = "Pickup")
+    void ClearAllPickupTargets()
+    {
+        TArray<AActor> Copy = PickupTargets;
+        for (AActor Target : Copy)
+        {
+            if (Target != nullptr)
+                UnregisterTarget(Target, true);
+        }
+        PickupTargets.Empty();
+    }
+
+    UFUNCTION(BlueprintCallable, Category = "Pickup")
+    void PlanCollectionStops(const TArray<AActor>& CandidateItems, bool& bImmediatePickup)
+    {
+        bImmediatePickup = false;
+
+        TArray<FItemWindow> ReachableWindows;
+        CurrentTurnState.RemainingPlan.Empty();
+
+        if (CandidateItems.Num() > 0 && PathSpline != nullptr)
+        {
+            // 1. Identify Reachable Windows
+            for (AActor Item : CandidateItems)
+            {
+                if (Item == nullptr) continue;
+
+                float DistAtClosest = GetClosestSplineDist(Item.GetActorLocation());
+                float ActualDist = Item.GetActorLocation().Distance(PathSpline.GetLocationAtDistanceAlongSpline(DistAtClosest, ESplineCoordinateSpace::World));
+
+                if (ActualDist <= TractorBeamRadius)
+                {
+                    float HalfWindow = Math::Sqrt(Math::Square(TractorBeamRadius) - Math::Square(ActualDist));
+
+                    FItemWindow Win;
+                    Win.Item = Item;
+                    Win.Entry = DistAtClosest - HalfWindow;
+                    Win.Exit = DistAtClosest + HalfWindow;
+                    Win.OptDist = DistAtClosest;
+
+                    ReachableWindows.Add(Win);
+                }
+            }
+
+            // Sort upcoming windows linearly along the spline track
+            ReachableWindows.Sort();
+
+            // 2. Dynamic Cluster Thresholding using Ship Speed vs. Pull Speed
+            TArray<FStopEvent> BuiltStops;
+            FStopEvent CurrentStop;
+            float CurrentExt = 0.0;
+            float CurrentEnt = 0.0;
+
+            const float DynamicMaxSpan = ProximityAlpha * TractorBeamRadius;
+
+            for (int32 i = 0; i < ReachableWindows.Num(); i++)
+            {
+                FItemWindow Win = ReachableWindows[i];
+
+                if (CurrentStop.PendingItems.Num() == 0)
+                {
+                    CurrentStop.PendingItems.Add(Win.Item);
+                    CurrentEnt = Win.Entry;
+                    CurrentExt = Win.Exit;
+                }
+                else
+                {
+                    float NextEnt = Math::Max(CurrentEnt, Win.Entry);
+                    float NextExt = Math::Min(CurrentExt, Win.Exit);
+
+                    bool bWindowsOverlap = (NextEnt <= NextExt);
+
+                    // OptLSpan calculation relative to cluster head
+                    float GroupStartOptDist = GetClosestSplineDist(CurrentStop.PendingItems[0].GetActorLocation());
+                    float OptLSpan = Win.OptDist - GroupStartOptDist;
+
+                    if (bWindowsOverlap && (OptLSpan <= DynamicMaxSpan))
+                    {
+                        CurrentStop.PendingItems.Add(Win.Item);
+                        CurrentEnt = NextEnt;
+                        CurrentExt = NextExt;
+                    }
+                    else
+                    {
+                        // Commit current cluster
+                        CurrentStop.StopDistance = Math::Max((CurrentEnt + CurrentExt) / 2.0, 0.0);
+                        CurrentStop.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(CurrentStop.StopDistance, ESplineCoordinateSpace::World);
+                        BuiltStops.Add(CurrentStop);
+
+                        // Initialize a new cluster
+                        CurrentStop.PendingItems.Empty();
+                        CurrentStop.PendingItems.Add(Win.Item);
+                        CurrentEnt = Win.Entry;
+                        CurrentExt = Win.Exit;
+                    }
+                }
+            }
+
+            if (CurrentStop.PendingItems.Num() > 0)
+            {
+                CurrentStop.StopDistance = (CurrentEnt + CurrentExt) / 2.0;
+                CurrentStop.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(CurrentStop.StopDistance, ESplineCoordinateSpace::World);
+                BuiltStops.Add(CurrentStop);
+            }
+
+            // 3. LPT Sort inside stops
+            for (FStopEvent& Stop : BuiltStops)
+            {
+                UGameUtility::SortActorsOnDistance(Stop.PendingItems, Stop.StopLocation);
+                CurrentTurnState.RemainingPlan.Add(Stop);
+            }
+
+            // 4. Immediate pickup evaluation
+            if (CurrentTurnState.RemainingPlan.Num() > 0)
+            {
+                const float CurrentShipDist = GetShipSplineDist();
+                const float FirstStopDist = CurrentTurnState.RemainingPlan[0].StopDistance;
+
+                const float ImmediatePickupTolerance = 5.0;
+                bImmediatePickup = (FirstStopDist <= CurrentShipDist + ImmediatePickupTolerance);
+            }
+        }
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Pickup")
+    TArray<AActor> GetPickupTargets() const
+    {
+        return PickupTargets;
+    }
+
+    UFUNCTION(BlueprintCallable, Category = "Pickup")
+    TArray<FVector> GetPlannedStopLocations() const
+    {
+        TArray<FVector> Locations;
+        Locations.Reserve(CurrentTurnState.RemainingPlan.Num());
+
+        for (const FStopEvent& Stop : CurrentTurnState.RemainingPlan)
+        {
+            Locations.Add(Stop.StopLocation);
+        }
+
+        return Locations;
+    }
+
+    // ==================================================================
+    // Reactive event handlers
+    // ==================================================================
+
+    UFUNCTION()
+    private void HandleItemPickedUp(AActor LootObject, FGameItem Item)
+    {
+        if (LootObject == nullptr)
+            return;
+
+        UnregisterTarget(LootObject, false);
+        OnItemCollected.Broadcast(LootObject, Item);
+        CachedGameState.GameObjects.Remove(Cast<AGameObject>(LootObject));
+        LootObject.DestroyActor();
+
+        if (IsStoppedForPickup() && CurrentTurnState.ActiveBeams.Num() == 0 && CurrentTurnState.BeamQueue.Num() == 0)
+        {
+            ResumeFromPickup();
+        }
+    }
+
+    UFUNCTION()
+    private void HandleItemDestroyed(AActor DestroyedActor)
+    {
+        if (DestroyedActor == nullptr)
+            return;
+
+        ULootComponent PC = DestroyedActor.GetComponentByClass(ULootComponent);
+        if (PC != nullptr)
+        {
+            PC.ReleasePullerClaim(Owner);
+            PC.OnItemPickedUp.UnbindObject(this);
+        }
+
+        PickupTargets.Remove(DestroyedActor);
+
+        if (IsStoppedForPickup() && CurrentTurnState.ActiveBeams.Num() == 0 && CurrentTurnState.BeamQueue.Num() == 0)
+        {
+            ResumeFromPickup();
+        }
+    }
+
+    // ==================================================================
+    // Private helpers
+    // ==================================================================
+
+    private void TickPickup(float DeltaTime)
+    {
+        const FVector ShipLoc = Owner.ActorLocation;
+
+        // 1. Initial configuration when a planned stop is hit and beams are clean
+        if (CurrentTurnState.ActiveBeams.Num() == 0 && CurrentTurnState.BeamQueue.Num() == 0)
+        {
+            if (CurrentTurnState.RemainingPlan.Num() > 0)
+            {
+                ExecuteNextStop(); // Transfers the pre-sorted items to CurrentTurnState.BeamQueue
+            }
+            else
+            {
+                ResumeFromPickup();
+                return;
+            }
+        }
+
+        // 2. Dynamic Slot Maintenance: Fill available beam slots
+        while (CurrentTurnState.ActiveBeams.Num() < MaxSimultaneousPickups && CurrentTurnState.BeamQueue.Num() > 0)
+        {
+            AActor CandidateItem = CurrentTurnState.BeamQueue[0];
+            CurrentTurnState.BeamQueue.RemoveAt(0);
+
+            if (CandidateItem == nullptr) continue;
+
+            ULootComponent PickupComp = CandidateItem.GetComponentByClass(ULootComponent);
+            if (PickupComp != nullptr && PickupComp.bCanBePickedUp && !PickupComp.IsCollected())
+            {
+                float Dist = CandidateItem.GetActorLocation().Distance(ShipLoc);
+                float Score = (Dist > 0.1) ? (TractorBeamPullSpeed / (Dist * Dist)) : TractorBeamPullSpeed;
+
+                if (PickupComp.TryClaimAsPuller(Owner, Score))
+                {
+                    int32 TargetSlotIndex = 0;
+                    TArray<int32> TakenSlots;
+                    for (const FBeamState& B : CurrentTurnState.ActiveBeams)
+                        TakenSlots.Add(B.BeamIndex);
+
+                    while (TakenSlots.Contains(TargetSlotIndex))
+                    {
+                        TargetSlotIndex++;
+                    }
+
+                    LaunchBeam(CandidateItem, TargetSlotIndex);
+                }
+                else
+                {
+                    PickupComp.ReleasePullerClaim(Owner);
+                }
+            }
+        }
+
+        // 3. Process Active Concurrently Claimed Beams
+        for (int32 i = CurrentTurnState.ActiveBeams.Num() - 1; i >= 0; i--)
+        {
+            FBeamState& Beam = CurrentTurnState.ActiveBeams[i];
+
+            if (Beam.Item == nullptr)
+            {
+                CurrentTurnState.ActiveBeams.RemoveAt(i);
+                continue;
+            }
+
+            ULootComponent PickupComp = Beam.Item.GetComponentByClass(ULootComponent);
+            if (PickupComp == nullptr || PickupComp.IsCollected() || !PickupComp.bCanBePickedUp)
+            {
+                if (PickupComp != nullptr)
+                    PickupComp.ReleasePullerClaim(Owner);
+                CurrentTurnState.ActiveBeams.RemoveAt(i);
+                continue;
+            }
+
+            bool bCollected = PickupComp.UpdatePullMovement(Owner, ShipLoc, TractorBeamPullSpeed, DeltaTime);
+
+            if (bCollected)
+            {
+                PickupComp.ReleasePullerClaim(Owner);
+                CurrentTurnState.ActiveBeams.RemoveAt(i);
+            }
+        }
+
+        // End stop criteria check
+        if (CurrentTurnState.ActiveBeams.Num() == 0 && CurrentTurnState.BeamQueue.Num() == 0)
+        {
+            ResumeFromPickup();
+        }
+    }
+
+    private void ExecuteNextStop()
+    {
+        if (CurrentTurnState.RemainingPlan.Num() == 0) return;
+
+        FStopEvent NextStop = CurrentTurnState.RemainingPlan[0];
+        CurrentTurnState.RemainingPlan.RemoveAt(0);
+
+        // Stage all planned items for this stop into the tracking queue
+        CurrentTurnState.BeamQueue = NextStop.PendingItems;
+        CurrentTurnState.ActiveBeams.Empty();
+    }
+
+    private void UnregisterTarget(AActor ItemActor, const bool bReleaseClaim)
+    {
+        if (ItemActor == nullptr)
+            return;
+
+        ULootComponent PC = ItemActor.GetComponentByClass(ULootComponent);
+        if (PC != nullptr)
+        {
+            if (bReleaseClaim)
+                PC.ReleasePullerClaim(Owner);
+            PC.OnItemPickedUp.UnbindObject(this);
+        }
+
+        ItemActor.OnDestroyed.UnbindObject(this);
+        PickupTargets.Remove(ItemActor);
+    }
+
+    private void LaunchBeam(AActor Item, int32 BeamIndex)
+    {
+        if (Item == nullptr) return;
+
+        FBeamState NewBeam;
+        NewBeam.Item = Item;
+        NewBeam.BeamIndex = BeamIndex;
+
+        CurrentTurnState.ActiveBeams.Add(NewBeam);
+    }
+
+    private float GetShipSplineDist() const
+    {
+        if (Owner == nullptr || PathSpline == nullptr)
+            return -1.0;
+
+        const FVector Closest = PathSpline.FindLocationClosestToWorldLocation(
+            Owner.ActorLocation, ESplineCoordinateSpace::World);
+        return PathSpline.GetDistanceAlongSplineAtLocation(Closest, ESplineCoordinateSpace::World);
+    }
+
+    private float GetClosestSplineDist(const FVector& ItemLocation) const
+    {
+        if (PathSpline == nullptr)
+            return -1.0;
+
+        const FVector Closest = PathSpline.FindLocationClosestToWorldLocation(
+            ItemLocation, ESplineCoordinateSpace::World);
+        return PathSpline.GetDistanceAlongSplineAtLocation(Closest, ESplineCoordinateSpace::World);
+    }
+
+    //attempt to fix
     private void PadSplineToFormula(int&out AnchorIdx)
     {
         int CurrentCount = PathSpline.GetNumberOfSplinePoints();
@@ -653,9 +1020,7 @@ class UTurnBasedMovementComponent : UActorComponent
         AnchorIdx = PathSpline.GetNumberOfSplinePoints() - 1;
         PathSpline.SetSplinePointType(AnchorIdx, ESplinePointType::Linear, false);
         //PathSpline.SetTangentsAtSplinePoint(AnchorIdx, AnchorArrive, FVector::ZeroVector, ESplineCoordinateSpace::World, false);
-        
+
         PathSpline.UpdateSpline();
     }
-
 }
-
