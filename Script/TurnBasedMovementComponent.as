@@ -692,17 +692,16 @@ class UTurnBasedMovementComponent : UActorComponent
 
         TArray<FItemWindow> ReachableWindows;
         TArray<FBeamState> PreviousBeams = CurrentTurnState.ActiveBeams;
-        Print(f"{PreviousBeams.Num()}", 2);
         CurrentTurnState.RemainingPlan.Empty();
 
         if (CandidateItems.Num() > 0 && PathSpline != nullptr)
         {
-            // 1. Identify Reachable Windows
+            // 1. Identify Reachable Windows for the CURRENT turn segment
             for (AActor Item : CandidateItems)
             {
                 if (Item == nullptr) continue;
 
-                // FIX: Exclude items that are already active in beams or queued from previous turns
+                // Exclude items that are already active in beams or queued from previous turns
                 if (IsItemInActiveBeamsOrQueue(PreviousBeams, Item))
                     continue;
 
@@ -714,13 +713,20 @@ class UTurnBasedMovementComponent : UActorComponent
                 {
                     float HalfWindow = Math::Sqrt(Math::Square(TractorBeamRadius) - Math::Square(ActualDist));
 
-                    FItemWindow Win;
-                    Win.Item = Item;
-                    Win.Entry = DistAtClosest - HalfWindow;
-                    Win.Exit = DistAtClosest + HalfWindow;
-                    Win.OptDist = DistAtClosest;
+                    float Entry = DistAtClosest - HalfWindow;
+                    float Exit  = DistAtClosest + HalfWindow;
 
-                    ReachableWindows.Add(Win);
+                    // FIX: Only plan items whose pickup windows overlap this turn's active path segment [StartDistance, EndDistance]
+                    if (Exit >= StartDistance && Entry <= EndDistance)
+                    {
+                        FItemWindow Win;
+                        Win.Item = Item;
+                        Win.Entry = Entry;
+                        Win.Exit = Exit;
+                        Win.OptDist = DistAtClosest;
+
+                        ReachableWindows.Add(Win);
+                    }
                 }
             }
 
@@ -732,6 +738,7 @@ class UTurnBasedMovementComponent : UActorComponent
             FStopEvent CurrentStop;
             float CurrentExt = 0.0;
             float CurrentEnt = 0.0;
+            float ClusterOptDistSum = 0.0;
 
             const float DynamicMaxSpan = ProximityAlpha * TractorBeamRadius;
 
@@ -744,6 +751,7 @@ class UTurnBasedMovementComponent : UActorComponent
                     CurrentStop.PendingItems.Add(Win.Item);
                     CurrentEnt = Win.Entry;
                     CurrentExt = Win.Exit;
+                    ClusterOptDistSum = Win.OptDist;
                 }
                 else
                 {
@@ -752,7 +760,6 @@ class UTurnBasedMovementComponent : UActorComponent
 
                     bool bWindowsOverlap = (NextEnt <= NextExt);
 
-                    // OptLSpan calculation relative to cluster head
                     float GroupStartOptDist = GetClosestSplineDist(GetItemLocation(CurrentStop.PendingItems[0]));
                     float OptLSpan = Win.OptDist - GroupStartOptDist;
 
@@ -761,11 +768,16 @@ class UTurnBasedMovementComponent : UActorComponent
                         CurrentStop.PendingItems.Add(Win.Item);
                         CurrentEnt = NextEnt;
                         CurrentExt = NextExt;
+                        ClusterOptDistSum += Win.OptDist;
                     }
                     else
                     {
                         // Commit current cluster
-                        CurrentStop.StopDistance = Math::Max((CurrentEnt + CurrentExt) / 2.0, 0.0);
+                        // FIX: Stop distance uses average OptDist clamped to valid window overlap and active turn range
+                        float AvgOptDist = ClusterOptDistSum / float(CurrentStop.PendingItems.Num());
+                        float ClampedStopDist = Math::Clamp(AvgOptDist, Math::Max(CurrentEnt, StartDistance), Math::Min(CurrentExt, EndDistance));
+
+                        CurrentStop.StopDistance = ClampedStopDist;
                         CurrentStop.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(CurrentStop.StopDistance, ESplineCoordinateSpace::World);
                         BuiltStops.Add(CurrentStop);
 
@@ -774,13 +786,17 @@ class UTurnBasedMovementComponent : UActorComponent
                         CurrentStop.PendingItems.Add(Win.Item);
                         CurrentEnt = Win.Entry;
                         CurrentExt = Win.Exit;
+                        ClusterOptDistSum = Win.OptDist;
                     }
                 }
             }
 
             if (CurrentStop.PendingItems.Num() > 0)
             {
-                CurrentStop.StopDistance = (CurrentEnt + CurrentExt) / 2.0;
+                float AvgOptDist = ClusterOptDistSum / float(CurrentStop.PendingItems.Num());
+                float ClampedStopDist = Math::Clamp(AvgOptDist, Math::Max(CurrentEnt, StartDistance), Math::Min(CurrentExt, EndDistance));
+
+                CurrentStop.StopDistance = ClampedStopDist;
                 CurrentStop.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(CurrentStop.StopDistance, ESplineCoordinateSpace::World);
                 BuiltStops.Add(CurrentStop);
             }
@@ -791,21 +807,24 @@ class UTurnBasedMovementComponent : UActorComponent
                 UGameUtility::SortActorsOnDistance(Stop.PendingItems, Stop.StopLocation);
                 CurrentTurnState.RemainingPlan.Add(Stop);
             }
+        }
 
-            // 4. Immediate pickup evaluation
+        // 4. Immediate pickup evaluation
+        // FIX: Safely evaluate active beams carryover separately from planned stops
+        if (PreviousBeams.Num() > 0 || CurrentTurnState.BeamQueue.Num() > 0)
+        {
+            bImmediatePickup = true;
+        }
+        else if (CurrentTurnState.RemainingPlan.Num() > 0)
+        {
+            const float CurrentShipDist = GetShipSplineDist();
+            const float FirstStopDist = CurrentTurnState.RemainingPlan[0].StopDistance;
 
-            
-
-            if (CurrentTurnState.RemainingPlan.Num() > 0 || PreviousBeams.Num() > 0)
-            {
-                const float CurrentShipDist = GetShipSplineDist();
-                const float FirstStopDist = CurrentTurnState.RemainingPlan[0].StopDistance;
-
-                const float ImmediatePickupTolerance = 5.0;
-                bImmediatePickup = (FirstStopDist <= CurrentShipDist + ImmediatePickupTolerance);
-            }
+            const float ImmediatePickupTolerance = 5.0;
+            bImmediatePickup = (FirstStopDist <= CurrentShipDist + ImmediatePickupTolerance);
         }
     }
+
 
     UFUNCTION(BlueprintPure, Category = "Pickup")
     TArray<AActor> GetPickupTargets() const
