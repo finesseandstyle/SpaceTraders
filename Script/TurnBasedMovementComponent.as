@@ -115,10 +115,11 @@ class UTurnBasedMovementComponent : UActorComponent
     FTurnState CurrentTurnState;
 
     UPROPERTY(Category = "Pickup") float TractorBeamRadius = 1500.0;
-    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1500.0;
+    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 2500.0;
     UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 1;
 
     private TArray<AActor> PickupTargets;
+    private TArray<AActor> TempTargets;
 
     // ------------------------------------------------------------------
     // Events
@@ -226,6 +227,12 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void StartMovement()
     {
+        for (AActor ItemActor : TempTargets)
+        {
+            UnregisterTarget(ItemActor, true);
+        }
+        TempTargets.Empty();
+
         bool bImmediatePickup = false;
         PlanCollectionStops(PickupTargets, bImmediatePickup);
 
@@ -253,6 +260,10 @@ class UTurnBasedMovementComponent : UActorComponent
         MovementState = HasPathDefined() ? EShipMovementState::HasPathDefined : EShipMovementState::NoPathDefined;
         
         SetComponentTickEnabled(false);
+        for (AActor ItemActor : TempTargets)
+        {
+            UnregisterTarget(ItemActor, true);
+        }
     }
 
     UFUNCTION()
@@ -647,7 +658,10 @@ class UTurnBasedMovementComponent : UActorComponent
     void RemovePickupTarget(AActor ItemActor)
     {
         if (ItemActor != nullptr)
-            UnregisterTarget(ItemActor, true);
+        {
+            PickupTargets.Remove(ItemActor);
+            TempTargets.Add(ItemActor);
+        }
     }
 
     UFUNCTION(BlueprintCallable, Category = "Pickup")
@@ -667,17 +681,11 @@ class UTurnBasedMovementComponent : UActorComponent
         return FVector(ItemActor.GetActorLocation().X, ItemActor.GetActorLocation().Y, ZLevel);
     }
 
-    // Helper method to check if an item is already being pulled or queued
-    private bool IsItemInActiveBeamsOrQueue(const TArray<FBeamState>& CurrentPickups, AActor Item) const
+    // Helper method to check if an item is already being pulled
+    private bool IsItemInActiveBeamsOrQueue(AActor Item) const
     {
         if (Item == nullptr)
             return false;
-
-        for (const FBeamState& Beam : CurrentPickups)
-        {
-            if (Beam.Item == Item)
-                return true;
-        }
 
         if (CurrentTurnState.BeamQueue.Contains(Item))
             return true;
@@ -688,10 +696,13 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION(BlueprintCallable, Category = "Pickup")
     void PlanCollectionStops(const TArray<AActor>& CandidateItems, bool& bImmediatePickup)
     {
+        //Current bugs:
+        //Queueing a new path and selecting new items mid turn sometimes leaves "dead" items that can't be picked up
+        //Unmarking an item while it's being picked up mid turn will cancel its pickup.
+
         bImmediatePickup = false;
 
         TArray<FItemWindow> ReachableWindows;
-        TArray<FBeamState> PreviousBeams = CurrentTurnState.ActiveBeams;
         CurrentTurnState.RemainingPlan.Empty();
 
         if (CandidateItems.Num() > 0 && PathSpline != nullptr)
@@ -702,7 +713,7 @@ class UTurnBasedMovementComponent : UActorComponent
                 if (Item == nullptr) continue;
 
                 // Exclude items that are already active in beams or queued from previous turns
-                if (IsItemInActiveBeamsOrQueue(PreviousBeams, Item))
+                if (IsItemInActiveBeamsOrQueue(Item))
                     continue;
 
                 FVector ItemLoc = GetItemLocation(Item);
@@ -811,7 +822,7 @@ class UTurnBasedMovementComponent : UActorComponent
 
         // 4. Immediate pickup evaluation
         // FIX: Safely evaluate active beams carryover separately from planned stops
-        if (PreviousBeams.Num() > 0 || CurrentTurnState.BeamQueue.Num() > 0)
+        if (CurrentTurnState.BeamQueue.Num() > 0)
         {
             bImmediatePickup = true;
         }

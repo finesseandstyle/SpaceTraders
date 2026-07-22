@@ -28,10 +28,16 @@ class ULootComponent : UActorComponent
     private float CurrentPullerScore = -1.0;
     private bool bIsCollected = false;
 
+    UFUNCTION(BlueprintOverride)
+    void BeginPlay()
+    {
+        SetComponentTickEnabled(false);
+    }
 
     // -------------------------------------------------------------------------
     // Contention API
     // -------------------------------------------------------------------------
+
 
     bool TryClaimAsPuller(AActor BiddingShip, const float Score)
     {
