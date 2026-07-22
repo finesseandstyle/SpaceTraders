@@ -27,6 +27,11 @@ class AGameObject : APawn
     {
         //Body
     }
-    
-    
+
+    //Not advisable way to do this, TODO: find a better way of finding the main mesh of a game object
+    UFUNCTION()
+    UStaticMeshComponent GetMainMesh()
+    {
+        return Cast<UStaticMeshComponent>(FindComponentByTag(UStaticMeshComponent, n"MainMesh"));
+    }
 }

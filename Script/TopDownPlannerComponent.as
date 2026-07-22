@@ -27,14 +27,18 @@ enum ETurnMovementType {
     Hyperjump
 }
 
+event void FOnHoveredObjectChanged(AGameObject PreviousObject, AGameObject Object);
 
 class UTopDownPlannerComponent : UActorComponent
 {
+    UPROPERTY() FOnHoveredObjectChanged OnHoveredObjectChanged;
+
     UPROPERTY() FVector PlayfieldLocation;
     UPROPERTY() FVector ScrollingLocation;
     
     UPROPERTY() AGameObject SelectedObject;
     UPROPERTY() AGameObject HoveredObject;
+    private AGameObject CurrentHoveredObject = nullptr;
 
     UPROPERTY() AGameObject PlayerShip;
     UPROPERTY() UTurnBasedMovementComponent MoveComp;
@@ -82,6 +86,15 @@ class UTopDownPlannerComponent : UActorComponent
         
         GameMath::GetObjectAtCursorLocation(PlayfieldLocation, Params, HoveredObject);
             //Print(f"{HoveredObject.ObjectType.TagName}", 0);
+
+        if (HoveredObject != CurrentHoveredObject)
+        {
+            // Hovered object CHANGED to a new valid actor!
+            OnHoveredObjectChanged.Broadcast(CurrentHoveredObject, HoveredObject);
+
+            // Update tracking reference
+            CurrentHoveredObject = HoveredObject;
+        }
     }
 
     UFUNCTION()
@@ -176,8 +189,9 @@ class UTopDownPlannerComponent : UActorComponent
     }
 
     //Duration -1 means we draw forever until there's a change
+    //HostileAction is either 0.0 or 1.0
     UFUNCTION()
-    void DrawPath(UTurnBasedMovementComponent MovementComponent, FVector AdjustedLocation, int Distance, int Days, bool UsePlayerPath=true, float Duration=-1)
+    void DrawPath(UTurnBasedMovementComponent MovementComponent, FVector AdjustedLocation, int Distance, int Days, bool UsePlayerPath=true, float Duration=-1, float HostileAction=0.0)
     {
         if (UsePlayerPath)
         {
@@ -196,24 +210,14 @@ class UTopDownPlannerComponent : UActorComponent
             NiagaraDataInterfaceArray::SetNiagaraArrayVector(PlayerPath, n"CurrentPathPositions", CurrentPath);
             NiagaraDataInterfaceArray::SetNiagaraArrayVector(PlayerPath, n"RemainingPathPositions", RemainingPath);
             NiagaraDataInterfaceArray::SetNiagaraArrayVector(PlayerPath, n"CheckpointPositions", Checkpoints);
-            for (FVector Location : CurrentPath)
-            {
-                ShadowPath1.Add(FVector(Location.X, Location.Y, Location.Z - 1));
-            }
-            for (FVector Location : RemainingPath)
-            {
-                ShadowPath2.Add(FVector(Location.X, Location.Y, Location.Z - 1));
-            }
-            NiagaraDataInterfaceArray::SetNiagaraArrayVector(PlayerPath, n"ShadowPositions", ShadowPath1);
-            NiagaraDataInterfaceArray::SetNiagaraArrayVector(PlayerPath, n"ShadowPositionsRemaining", ShadowPath2);
 
             if (MovementComponent.CheckpointDistances.Num() > 2)
             {
-                PlayerPath.SetFloatParameter(n"HostileOpacityRemaining", 0.0);
+                PlayerPath.SetFloatParameter(n"HostileOpacityRemaining", HostileAction);
             }
             else 
             {
-                PlayerPath.SetFloatParameter(n"HostileOpacityCurrent", 0.0);    
+                PlayerPath.SetFloatParameter(n"HostileOpacityCurrent", HostileAction);    
             }
 
             if (Duration == -1)

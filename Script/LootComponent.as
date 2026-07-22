@@ -1,5 +1,8 @@
 event void FOnItemPickedUp(AActor LootObject, FGameItem Item);
 
+const float SnapCollectRadius = 30.0;
+const float ContestHysteresis = 1.5;
+
 class ULootComponent : UActorComponent
 {
     // -------------------------------------------------------------------------
@@ -7,7 +10,6 @@ class ULootComponent : UActorComponent
     // -------------------------------------------------------------------------
 
     // Item is collected when it reaches within this radius of the ship. */
-    UPROPERTY() float SnapCollectRadius = 60.0;
     UPROPERTY() bool bCanBePickedUp = true;
     UPROPERTY(ExposeOnSpawn) FGameItem Item;
 
@@ -26,7 +28,6 @@ class ULootComponent : UActorComponent
     private float CurrentPullerScore = -1.0;
     private bool bIsCollected = false;
 
-    private const float ContestHysteresis = 1.5;
 
     // -------------------------------------------------------------------------
     // Contention API

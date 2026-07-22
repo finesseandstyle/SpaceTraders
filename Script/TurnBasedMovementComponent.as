@@ -113,9 +113,9 @@ class UTurnBasedMovementComponent : UActorComponent
     UPROPERTY()
     FTurnState CurrentTurnState;
 
-    UPROPERTY(Category = "Pickup") float TractorBeamRadius = 1500.0;
-    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1000.0;
-    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 3;
+    UPROPERTY(Category = "Pickup") float TractorBeamRadius = 750.0;
+    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 500.0;
+    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 1;
     UPROPERTY(Category = "Pickup") float ProximityAlpha = 0.4;
 
     private TArray<AActor> PickupTargets;
@@ -177,21 +177,6 @@ class UTurnBasedMovementComponent : UActorComponent
     // ==================================================================
 
     UFUNCTION()
-    void OnTurnStart()
-    {
-        SetComponentTickEnabled(true);
-
-        bool bImmediatePickup = false;
-        PlanCollectionStops(PickupTargets, bImmediatePickup);
-
-        StartMovement();
-        if (bImmediatePickup)
-        {
-            StopForPickup(true);
-        }
-    }
-
-    UFUNCTION()
     bool SetNextPathSegment()
     {
         if (PathSpline == nullptr) return false;
@@ -241,16 +226,26 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void StartMovement()
     {
+        bool bImmediatePickup = false;
+        PlanCollectionStops(PickupTargets, bImmediatePickup);
+
         if (!HasPathDefined())
+        {
+            SetComponentTickEnabled(true);
             return;
+        }
 
         PreviousMovementState = MovementState;
-        MovementState = EShipMovementState::Moving; //watch out for frame 0 item pickup this could be set to stopped for pickup.
-        SetComponentTickEnabled(true);
+        MovementState = (bImmediatePickup) ? EShipMovementState::StoppedForPickup : EShipMovementState::Moving;
         OriginalNominalSpeed = (CachedGameState.TurnDuration > 0.0) ? (SegmentLength / CachedGameState.TurnDuration) : 0.0;
         OriginalDirection = PathSpline.GetDirectionAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
         StoppedTimeStart = 0.0;
         StoppedTimeEnd = 0.0;
+        if (bImmediatePickup)
+        {
+            StopForPickup(true);
+        }
+        SetComponentTickEnabled(true);
     }
 
     UFUNCTION()
@@ -385,6 +380,7 @@ class UTurnBasedMovementComponent : UActorComponent
         return true;
     }
 
+    //Use when turn is paused and we clicked ourselves or if an invalid equipment configuration made us unable to move
     UFUNCTION()
     void CancelPath()
     {
@@ -819,6 +815,7 @@ class UTurnBasedMovementComponent : UActorComponent
         UnregisterTarget(LootObject, false);
         OnItemCollected.Broadcast(LootObject, Item);
         CachedGameState.GameObjects.Remove(Cast<AGameObject>(LootObject));
+        //TODO: Inventory transfer functionality
         LootObject.DestroyActor();
 
         if (IsStoppedForPickup() && CurrentTurnState.ActiveBeams.Num() == 0 && CurrentTurnState.BeamQueue.Num() == 0)
