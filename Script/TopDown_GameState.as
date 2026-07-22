@@ -61,6 +61,7 @@ class ATopDown_GameState : AGameStateBase
         {
             GameObjects[i].Update(NormalizedTurnProgress);
         }*/
+        Print(f"{NormalizedTurnProgress}", 0);
     }
 
     //Returns real time seconds elapsed after turn start
