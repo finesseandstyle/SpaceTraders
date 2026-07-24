@@ -682,7 +682,7 @@ class UTurnBasedMovementComponent : UActorComponent
     }
 
     // Helper method to check if an item is already being pulled
-    private bool IsItemInActiveBeamsOrQueue(AActor Item) const
+    private bool IsItemInActiveBeams(AActor Item) const
     {
         if (Item == nullptr)
             return false;
@@ -698,7 +698,6 @@ class UTurnBasedMovementComponent : UActorComponent
     {
         //Current bugs:
         //Queueing a new path and selecting new items mid turn sometimes leaves "dead" items that can't be picked up
-        //Unmarking an item while it's being picked up mid turn will cancel its pickup.
 
         bImmediatePickup = false;
 
@@ -707,13 +706,15 @@ class UTurnBasedMovementComponent : UActorComponent
 
         if (CandidateItems.Num() > 0 && PathSpline != nullptr)
         {
+            float SplineLength = PathSpline.GetSplineLength();
+            
             // 1. Identify Reachable Windows for the CURRENT turn segment
             for (AActor Item : CandidateItems)
             {
                 if (Item == nullptr) continue;
 
                 // Exclude items that are already active in beams or queued from previous turns
-                if (IsItemInActiveBeamsOrQueue(Item))
+                if (IsItemInActiveBeams(Item))
                     continue;
 
                 FVector ItemLoc = GetItemLocation(Item);
@@ -790,7 +791,11 @@ class UTurnBasedMovementComponent : UActorComponent
 
                         CurrentStop.StopDistance = ClampedStopDist;
                         CurrentStop.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(CurrentStop.StopDistance, ESplineCoordinateSpace::World);
-                        BuiltStops.Add(CurrentStop);
+                        
+                        if (ShouldCommitStop(CurrentStop, SplineLength))
+                        {
+                            BuiltStops.Add(CurrentStop);
+                        }
 
                         // Initialize a new cluster
                         CurrentStop.PendingItems.Empty();
@@ -809,7 +814,11 @@ class UTurnBasedMovementComponent : UActorComponent
 
                 CurrentStop.StopDistance = ClampedStopDist;
                 CurrentStop.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(CurrentStop.StopDistance, ESplineCoordinateSpace::World);
-                BuiltStops.Add(CurrentStop);
+                
+                if (ShouldCommitStop(CurrentStop, SplineLength))
+                {
+                    BuiltStops.Add(CurrentStop);
+                }
             }
 
             // 3. LPT Sort inside stops
@@ -834,6 +843,34 @@ class UTurnBasedMovementComponent : UActorComponent
             const float ImmediatePickupTolerance = 5.0;
             bImmediatePickup = (FirstStopDist <= CurrentShipDist + ImmediatePickupTolerance);
         }
+    }
+
+    private bool ShouldCommitStop(const FStopEvent& Stop, float TotalSplineLength)
+    {
+        
+        if (Stop.PendingItems.Num() == 0)
+            return false;
+
+        // Always allow stops at the very end of the spline path
+        const float EndOfSplineTolerance = 10.0;
+        if (Stop.StopDistance >= TotalSplineLength - EndOfSplineTolerance)
+            return true;
+
+        // Check if at least ONE item in this stop is perpendicular or behind the stop position
+        const float PerpendicularTolerance = 5.0;
+        for (AActor Item : Stop.PendingItems)
+        {
+            if (Item == nullptr) continue;
+
+            float ItemOptDist = GetClosestSplineDist(GetItemLocation(Item));
+            if (ItemOptDist <= Stop.StopDistance + PerpendicularTolerance)
+            {
+                return true; // Valid stop: item is perpendicular or behind
+            }
+        }
+
+        // All items are strictly in front of the ship at StopDistance -> Skip stop for now
+        return false;
     }
 
 

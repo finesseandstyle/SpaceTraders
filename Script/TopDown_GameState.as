@@ -21,8 +21,8 @@ class ATopDown_GameState : AGameStateBase
     
     //World Stuff, Ships spawn in their own horizontal plane
     UPROPERTY() float LocalWorldHalfSize = 200000.0; //depends on the star system
-    UPROPERTY() float MinZPlane = 700.0;
-    UPROPERTY() float MaxZPlane = 1100;
+    UPROPERTY() float MinZPlane = 5700.0;
+    UPROPERTY() float MaxZPlane = 6100;
     
     //Turn Logic stuff
     private FTimerHandle TurnTimer;
