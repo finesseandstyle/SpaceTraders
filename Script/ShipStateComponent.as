@@ -15,4 +15,4 @@ class UShipStateComponent : UActorComponent
     {
         return ShipSpeed * 10;
     }
-}
+};

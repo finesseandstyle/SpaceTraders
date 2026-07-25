@@ -5,4 +5,4 @@ struct FGameItem {
     UPROPERTY() FGameplayTag Origin;
     UPROPERTY() FGameplayTag Manufacturer; 
     UPROPERTY() TArray<UItemFragment> Fragments;
-}
+};

@@ -44,27 +44,27 @@ enum EShipMovementState
     HasPathDefined,
     Moving,
     StoppedForPickup
-}
+};
 
 struct FBeamState
 {
     AActor Item = nullptr;
     int32 BeamIndex = 0;
-}
+};
 
 struct FStopEvent
 {
     float StopDistance = 0.0;
     FVector StopLocation = FVector::ZeroVector;
     TArray<AActor> PendingItems;
-}
+};
 
 struct FTurnState
 {
     TArray<FBeamState> ActiveBeams;
     TArray<AActor> BeamQueue;
     TArray<FStopEvent> RemainingPlan;
-}
+};
 
 // Helper struct for internal calculation in PlanCollectionStops
 struct FItemWindow
@@ -76,17 +76,17 @@ struct FItemWindow
 
     int opCmp(const FItemWindow& Other) const
     {
-        if (OptDist < Other.OptDist)
+        if (OptDist < Other.OptDist) 
             return -1;
-        if (OptDist > Other.OptDist)
+        if (OptDist > Other.OptDist) 
             return 1;
+
         return 0;
     }
-}
+};
 
 const float ProximityAlpha = 0.4;
 
-UCLASS()
 class UTurnBasedMovementComponent : UActorComponent
 {
     ATopDown_GameState CachedGameState;
@@ -615,7 +615,9 @@ class UTurnBasedMovementComponent : UActorComponent
         if (!(DestinationLocation.Distance(CurrentLocation) * 0.5f > FPathProperties().DubinsTurnRadius + CurrentSpeed / 50.f))
             return false;
 
-        bool AdjustedPath = UPathingUtils::AddPointsToPath(PathSpline, CurrentLocation, ForwardVector, Destination, 400, EndDistance, ZLevel, CurrentSpeed, FPathProperties());
+        bool bAdjustedPath = UPathingUtils::AddPointsToPath(PathSpline, CurrentLocation, ForwardVector, Destination, 400, EndDistance, ZLevel, CurrentSpeed, FPathProperties());
+
+        if (bAdjustedPath) return false;
         const float PathLength = PathSpline.GetSplineLength();
 
         CheckpointDistances.Empty();
@@ -683,161 +685,175 @@ class UTurnBasedMovementComponent : UActorComponent
         PickupTargets.Empty();
     }
 
+    //Normalized item location
     private FVector GetItemLocation(AActor ItemActor)
     {
         return FVector(ItemActor.GetActorLocation().X, ItemActor.GetActorLocation().Y, ZLevel);
     }
-
+    
     // Helper method to check if an item is already being pulled
-    private bool IsItemInActiveBeams(AActor Item) const
+    private bool IsItemBeingPulled(AActor Item) const
     {
         if (Item == nullptr)
             return false;
 
-        if (CurrentTurnState.BeamQueue.Contains(Item))
-            return true;
+        if (CurrentTurnState.BeamQueue.Contains(Item)) return true;
+        for (const FBeamState& Beam : CurrentTurnState.ActiveBeams)
+        {
+            if (Beam.Item == Item)
+            {
+                return true;
+            }
+        }
 
+        return false;
+    }
+
+    // ---- Step 1: reachability filtering (same math, unchanged) ----
+    private TArray<FItemWindow> ComputeReachableWindows(const TArray<AActor>& CandidateItems)
+    {
+        TArray<FItemWindow> Windows;
+
+        for (AActor Item : CandidateItems)
+        {
+            if (Item == nullptr || IsItemBeingPulled(Item))
+                continue;
+
+            FVector ItemLoc = GetItemLocation(Item);
+            float OptDist = GetClosestSplineDist(ItemLoc);
+            float ActualDist = ItemLoc.Distance(
+                PathSpline.GetLocationAtDistanceAlongSpline(OptDist, ESplineCoordinateSpace::World));
+
+            if (ActualDist > TractorBeamRadius)
+                continue;
+
+            float HalfWindow = Math::Sqrt(Math::Square(TractorBeamRadius) - Math::Square(ActualDist));
+            float Entry = OptDist - HalfWindow;
+            float Exit  = OptDist + HalfWindow;
+
+            if (Exit < StartDistance || Entry > EndDistance)
+                continue;
+
+            FItemWindow Win;
+            Win.Item = Item;
+            Win.Entry = Entry;
+            Win.Exit = Exit;
+            Win.OptDist = OptDist;
+            Windows.Add(Win);
+        }
+
+        return Windows;
+    }
+
+    private TArray<FStopEvent> ClusterForMinimalPullTime(TArray<FItemWindow>& Windows)
+    {
+        TArray<FStopEvent> Stops;
+        if (Windows.Num() == 0)
+            return Stops;
+
+        Windows.Sort(); // ascending OptDist -- the order the ship actually meets them in
+
+        const float MaxSpan = ProximityAlpha * TractorBeamRadius;
+
+        FStopEvent Current;
+        float Lo = 0.0, Hi = 0.0;
+        float MinOpt = 0.0, MaxOpt = 0.0;
+
+        for (const FItemWindow& Win : Windows)
+        {
+            if (Current.PendingItems.Num() == 0)
+            {
+                Lo = Win.Entry;  Hi = Win.Exit;
+                MinOpt = Win.OptDist;  MaxOpt = Win.OptDist;
+            }
+            else
+            {
+                float NewLo = Math::Max(Lo, Win.Entry);
+                float NewHi = Math::Min(Hi, Win.Exit);
+                float NewMinOpt = Math::Min(MinOpt, Win.OptDist);
+                float NewMaxOpt = Math::Max(MaxOpt, Win.OptDist);
+
+                bool bStillOverlaps = NewLo <= NewHi;
+                bool bWithinSpan = (NewMaxOpt - NewMinOpt) <= MaxSpan;
+
+                if (!bStillOverlaps || !bWithinSpan)
+                {
+                    CommitCluster(Current, Lo, Hi, MinOpt, MaxOpt, Stops);
+                    Current = FStopEvent();
+                    Lo = Win.Entry;  Hi = Win.Exit;
+                    MinOpt = Win.OptDist;  MaxOpt = Win.OptDist;
+                }
+                else
+                {
+                    Lo = NewLo;  Hi = NewHi;
+                    MinOpt = NewMinOpt;  MaxOpt = NewMaxOpt;
+                }
+            }
+
+            Current.PendingItems.Add(Win.Item);
+        }
+
+        CommitCluster(Current, Lo, Hi, MinOpt, MaxOpt, Stops);
+        return Stops;
+    }
+
+    private void CommitCluster(FStopEvent& Cluster, float Lo, float Hi, float MinOpt, float MaxOpt, TArray<FStopEvent>& OutStops)
+    {
+        if (Cluster.PendingItems.Num() == 0)
+            return;
+
+        // Midpoint of the OptDist range minimizes the *worst* pull distance in the
+        // cluster -- that's what sets stop duration when beams run sequentially,
+        // not the mean.
+        float Midpoint = (MinOpt + MaxOpt) * 0.5;
+        float ClampedStopDist = Math::Clamp(Midpoint, Math::Max(Lo, StartDistance), Math::Min(Hi, EndDistance));
+
+        Cluster.StopDistance = ClampedStopDist;
+        Cluster.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(Cluster.StopDistance, ESplineCoordinateSpace::World);
+        OutStops.Add(Cluster);
+    }
+
+    // ---- Step 3: business rules, isolated and named ----
+    private bool IsTooCloseToSplineEnd(const FStopEvent& Stop, float TotalSplineLength)
+    {
+        const float EndOfSplineTolerance = 10.0;
+        return Stop.StopDistance >= TotalSplineLength - EndOfSplineTolerance;
+    }
+
+    private bool HasAdjacentItem(const FStopEvent& Stop)
+    {
+        // Defer a stop while every item in it is still ahead of the ship.
+        const float PerpendicularTolerance = 5.0;
+        for (AActor Item : Stop.PendingItems)
+        {
+            if (Item != nullptr && GetClosestSplineDist(GetItemLocation(Item)) <= Stop.StopDistance + PerpendicularTolerance)
+                return true;
+        }
         return false;
     }
 
     UFUNCTION(BlueprintCallable, Category = "Pickup")
     void PlanCollectionStops(const TArray<AActor>& CandidateItems, bool& bImmediatePickup)
     {
-        //Current bugs:
-        //Queueing a new path and selecting new items mid turn sometimes leaves "dead" items that can't be picked up
-
         bImmediatePickup = false;
-
-        TArray<FItemWindow> ReachableWindows;
         CurrentTurnState.RemainingPlan.Empty();
 
         if (CandidateItems.Num() > 0 && PathSpline != nullptr)
         {
             float SplineLength = PathSpline.GetSplineLength();
+            TArray<FItemWindow> PotentialStops = ComputeReachableWindows(CandidateItems);
+            TArray<FStopEvent> Stops = ClusterForMinimalPullTime(PotentialStops);
 
-            // 1. Identify Reachable Windows for the CURRENT turn segment
-            for (AActor Item : CandidateItems)
+            for (FStopEvent& Stop : Stops)
             {
-                if (Item == nullptr) continue;
-
-                // Exclude items that are already active in beams or queued from previous turns
-                if (IsItemInActiveBeams(Item))
+                if (IsTooCloseToSplineEnd(Stop, SplineLength) || !HasAdjacentItem(Stop))
                     continue;
 
-                FVector ItemLoc = GetItemLocation(Item);
-                float DistAtClosest = GetClosestSplineDist(ItemLoc);
-                float ActualDist = ItemLoc.Distance(PathSpline.GetLocationAtDistanceAlongSpline(DistAtClosest, ESplineCoordinateSpace::World));
-
-                if (ActualDist <= TractorBeamRadius)
-                {
-                    float HalfWindow = Math::Sqrt(Math::Square(TractorBeamRadius) - Math::Square(ActualDist));
-
-                    float Entry = DistAtClosest - HalfWindow;
-                    float Exit  = DistAtClosest + HalfWindow;
-
-                    // FIX: Only plan items whose pickup windows overlap this turn's active path segment [StartDistance, EndDistance]
-                    if (Exit >= StartDistance && Entry <= EndDistance)
-                    {
-                        FItemWindow Win;
-                        Win.Item = Item;
-                        Win.Entry = Entry;
-                        Win.Exit = Exit;
-                        Win.OptDist = DistAtClosest;
-
-                        ReachableWindows.Add(Win);
-                    }
-                }
-            }
-
-            // Sort upcoming windows linearly along the spline track
-            ReachableWindows.Sort();
-
-            // 2. Dynamic Cluster Thresholding using Ship Speed vs. Pull Speed
-            TArray<FStopEvent> BuiltStops;
-            FStopEvent CurrentStop;
-            float CurrentExt = 0.0;
-            float CurrentEnt = 0.0;
-            float ClusterOptDistSum = 0.0;
-
-            const float DynamicMaxSpan = ProximityAlpha * TractorBeamRadius;
-
-            for (int32 i = 0; i < ReachableWindows.Num(); i++)
-            {
-                FItemWindow Win = ReachableWindows[i];
-
-                if (CurrentStop.PendingItems.Num() == 0)
-                {
-                    CurrentStop.PendingItems.Add(Win.Item);
-                    CurrentEnt = Win.Entry;
-                    CurrentExt = Win.Exit;
-                    ClusterOptDistSum = Win.OptDist;
-                }
-                else
-                {
-                    float NextEnt = Math::Max(CurrentEnt, Win.Entry);
-                    float NextExt = Math::Min(CurrentExt, Win.Exit);
-
-                    bool bWindowsOverlap = (NextEnt <= NextExt);
-
-                    float GroupStartOptDist = GetClosestSplineDist(GetItemLocation(CurrentStop.PendingItems[0]));
-                    float OptLSpan = Win.OptDist - GroupStartOptDist;
-
-                    if (bWindowsOverlap && (OptLSpan <= DynamicMaxSpan))
-                    {
-                        CurrentStop.PendingItems.Add(Win.Item);
-                        CurrentEnt = NextEnt;
-                        CurrentExt = NextExt;
-                        ClusterOptDistSum += Win.OptDist;
-                    }
-                    else
-                    {
-                        // Commit current cluster
-                        // FIX: Stop distance uses average OptDist clamped to valid window overlap and active turn range
-                        float AvgOptDist = ClusterOptDistSum / float(CurrentStop.PendingItems.Num());
-                        float ClampedStopDist = Math::Clamp(AvgOptDist, Math::Max(CurrentEnt, StartDistance), Math::Min(CurrentExt, EndDistance));
-
-                        CurrentStop.StopDistance = ClampedStopDist;
-                        CurrentStop.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(CurrentStop.StopDistance, ESplineCoordinateSpace::World);
-                        
-                        if (ShouldCommitStop(CurrentStop, SplineLength))
-                        {
-                            BuiltStops.Add(CurrentStop);
-                        }
-
-                        // Initialize a new cluster
-                        CurrentStop.PendingItems.Empty();
-                        CurrentStop.PendingItems.Add(Win.Item);
-                        CurrentEnt = Win.Entry;
-                        CurrentExt = Win.Exit;
-                        ClusterOptDistSum = Win.OptDist;
-                    }
-                }
-            }
-
-            if (CurrentStop.PendingItems.Num() > 0)
-            {
-                float AvgOptDist = ClusterOptDistSum / float(CurrentStop.PendingItems.Num());
-                float ClampedStopDist = Math::Clamp(AvgOptDist, Math::Max(CurrentEnt, StartDistance), Math::Min(CurrentExt, EndDistance));
-
-                CurrentStop.StopDistance = ClampedStopDist;
-                CurrentStop.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(CurrentStop.StopDistance, ESplineCoordinateSpace::World);
-                
-                if (ShouldCommitStop(CurrentStop, SplineLength))
-                {
-                    BuiltStops.Add(CurrentStop);
-                }
-            }
-
-            // 3. LPT Sort inside stops
-            for (FStopEvent& Stop : BuiltStops)
-            {
                 UGameUtility::SortActorsOnDistance(Stop.PendingItems, Stop.StopLocation);
                 CurrentTurnState.RemainingPlan.Add(Stop);
             }
         }
 
-        // 4. Immediate pickup evaluation
-        // FIX: Safely evaluate active beams carryover separately from planned stops
         if (CurrentTurnState.BeamQueue.Num() > 0)
         {
             bImmediatePickup = true;
@@ -846,40 +862,10 @@ class UTurnBasedMovementComponent : UActorComponent
         {
             const float CurrentShipDist = GetShipSplineDist();
             const float FirstStopDist = CurrentTurnState.RemainingPlan[0].StopDistance;
-
             const float ImmediatePickupTolerance = 5.0;
             bImmediatePickup = (FirstStopDist <= CurrentShipDist + ImmediatePickupTolerance);
         }
     }
-
-    private bool ShouldCommitStop(const FStopEvent& Stop, float TotalSplineLength)
-    {
-        
-        if (Stop.PendingItems.Num() == 0)
-            return false;
-
-        // Never allow stops at the very end of the spline path
-        const float EndOfSplineTolerance = 10.0;
-        if (Stop.StopDistance >= TotalSplineLength - EndOfSplineTolerance)
-            return false;
-
-        // Check if at least ONE item in this stop is perpendicular or behind the stop position
-        const float PerpendicularTolerance = 5.0;
-        for (AActor Item : Stop.PendingItems)
-        {
-            if (Item == nullptr) continue;
-
-            float ItemOptDist = GetClosestSplineDist(GetItemLocation(Item));
-            if (ItemOptDist <= Stop.StopDistance + PerpendicularTolerance)
-            {
-                return true; // Valid stop: item is perpendicular or behind
-            }
-        }
-
-        // All items are strictly in front of the ship at StopDistance -> Skip stop for now
-        return false;
-    }
-
 
     UFUNCTION(BlueprintPure, Category = "Pickup")
     TArray<AActor> GetPickupTargets() const
@@ -1126,4 +1112,4 @@ class UTurnBasedMovementComponent : UActorComponent
 
         PathSpline.UpdateSpline();
     }
-}
+};

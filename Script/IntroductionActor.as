@@ -11,4 +11,4 @@ class AIntroductionActor : AActor
 
     UPROPERTY(DefaultComponent)
     USixDOFMovementComponent MovementComp;
-}
+};

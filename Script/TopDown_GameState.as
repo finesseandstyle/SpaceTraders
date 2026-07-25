@@ -150,4 +150,4 @@ class ATopDown_GameState : AGameStateBase
             System::ClearAndInvalidateTimerHandle(TurnTimer);
         }
     }
-}
+};

@@ -17,4 +17,4 @@ class ATurnMarker : AActor
     {
         //override in BP_TurnMarker
     }
-}
+};

@@ -1,6 +1,6 @@
 event void FOnItemPickedUp(AActor LootObject, FGameItem Item);
 
-const float SnapCollectRadius = 30.0;
+const float SnapCollectRadius = 20.0;
 const float ContestHysteresis = 1.5;
 
 class ULootComponent : UActorComponent
@@ -150,4 +150,4 @@ class ULootComponent : UActorComponent
     {
         return CurrentPuller;
     }
-}
+};

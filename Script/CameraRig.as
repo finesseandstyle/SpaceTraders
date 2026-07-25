@@ -27,7 +27,7 @@ class ACameraRig : APawn
     UPROPERTY(Category = "Camera Config") float RecenterDuration = 1;
 
     // --- State ---
-    UPROPERTY(Category = "Camera State") bool IsFollowing = false;
+    UPROPERTY(Category = "Camera State") bool bIsFollowing = false;
     UPROPERTY(Category = "Camera State") AActor TargetToFollow = nullptr;
     UPROPERTY(Category = "Camera State") bool bRotateCamera = false;
     UPROPERTY(Category = "Camera State") bool bIsTurnPaused = true;
@@ -100,7 +100,7 @@ class ACameraRig : APawn
     UFUNCTION(BlueprintOverride)
     void Tick(float DeltaSeconds)
     {
-        if (IsFollowing && TargetToFollow != nullptr)
+        if (bIsFollowing && TargetToFollow != nullptr)
         {
             FVector TargetLoc = TargetToFollow.GetActorLocation();
             TargetLoc.Z = ZLevel;
@@ -208,7 +208,7 @@ class ACameraRig : APawn
     void SetFreeCamera()
     {
         SetDefaultCamera();
-        IsFollowing = false;
+        bIsFollowing = false;
         TargetToFollow = nullptr;
         bIsTransitioningToFollow = false;
         TransitionElapsed = 0.0;
@@ -227,7 +227,7 @@ class ACameraRig : APawn
         NewSpringArmLength = Math::Clamp(NewSpringArmLength, MinZoom, MaxZoom);
         
         // Cache cursor data for the active zoom lifecycle
-        if (!IsFollowing && bZoomToCursor)
+        if (!bIsFollowing && bZoomToCursor)
         {
             SetFreeCamera();
             TargetPlayfieldLocation = PlayfieldLocation;
@@ -268,7 +268,7 @@ class ACameraRig : APawn
         }
 
         TargetToFollow = NewTarget;
-        IsFollowing = true;
+        bIsFollowing = true;
         bIsTransitioningOffsetToZero = false; 
 
         if (bIsTurnPaused)
@@ -314,4 +314,4 @@ class ACameraRig : APawn
         
         AddActorWorldOffset(FVector(OffsetX, 0, 0));
     }
-}
+};

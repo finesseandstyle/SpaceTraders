@@ -51,4 +51,4 @@ class UTopDown_Settings : UGameUserSettings
         TurnDuration = Math::Clamp(NewTurnDuration, 2.0f, 10.0f); 
         Cast<ATopDown_GameState>(Gameplay::GetGameState()).SetNewTurnDuration(TurnDuration);
     }
-}
+};

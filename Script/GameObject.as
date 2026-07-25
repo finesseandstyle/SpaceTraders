@@ -34,4 +34,4 @@ class AGameObject : APawn
     {
         return Cast<UStaticMeshComponent>(FindComponentByTag(UStaticMeshComponent, n"MainMesh"));
     }
-}
+};

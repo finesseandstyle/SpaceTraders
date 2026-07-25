@@ -8,14 +8,14 @@ enum EInteractionResult {
         OnLoot,
         OnSpaceship,
         OnAsteroid
-}
+};
 
 enum EPathingClickType {
     NewPath,
     AddWaypointToPath,
     QueuePathMidTurn,
     CancelPathQueueing,
-}
+};
 
 enum ETurnMovementType {
     Fly,
@@ -25,7 +25,7 @@ enum ETurnMovementType {
     AutoFight,
     LongRange,
     Hyperjump
-}
+};
 
 event void FOnHoveredObjectChanged(AGameObject PreviousObject, AGameObject Object);
 
@@ -191,9 +191,9 @@ class UTopDownPlannerComponent : UActorComponent
     //Duration -1 means we draw forever until there's a change
     //HostileAction is either 0.0 or 1.0
     UFUNCTION()
-    void DrawPath(UTurnBasedMovementComponent MovementComponent, FVector AdjustedLocation, int Distance, int Days, bool UsePlayerPath=true, float Duration=-1, float HostileAction=0.0)
+    void DrawPath(UTurnBasedMovementComponent MovementComponent, FVector AdjustedLocation, int Distance, int Days, bool bUsePlayerPath=true, float Duration=-1, float HostileAction=0.0)
     {
-        if (UsePlayerPath)
+        if (bUsePlayerPath)
         {
             TurnMarker.SetActorHiddenInGame(false);
             TurnMarker.SetLandingState(MovementType);
@@ -267,4 +267,4 @@ class UTopDownPlannerComponent : UActorComponent
         MoveComp.SetRotatedPath(ClickStartLocation, DragEndLocation, Distance, Days, AdjustedLocation);
         DrawPath(MoveComp, AdjustedLocation, Distance, Days);
     }
-}
+};
