@@ -35,6 +35,8 @@
 //   "pause" it.
 
 event void FOnItemCollected(AActor CollectedItem, FGameItem Item);
+event void FOnPickupStart();
+event void FOnPickupEnd();
 
 enum EShipMovementState
 {
@@ -89,6 +91,9 @@ class UTurnBasedMovementComponent : UActorComponent
 {
     ATopDown_GameState CachedGameState;
 
+    UPROPERTY() FOnPickupStart OnPickupStart;
+    UPROPERTY() FOnPickupEnd OnPickupEnd;
+
     // ------------------------------------------------------------------
     // Movement
     // ------------------------------------------------------------------
@@ -115,7 +120,7 @@ class UTurnBasedMovementComponent : UActorComponent
     FTurnState CurrentTurnState;
 
     UPROPERTY(Category = "Pickup") float TractorBeamRadius = 1500.0;
-    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 2500.0;
+    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1500.0;
     UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 1;
 
     private TArray<AActor> PickupTargets;
@@ -275,6 +280,7 @@ class UTurnBasedMovementComponent : UActorComponent
         StoppedTimeStart = CachedGameState.NormalizedTurnProgress;
 
         MovementState = EShipMovementState::StoppedForPickup;
+        OnPickupStart.Broadcast();
     }
 
     UFUNCTION()
@@ -286,6 +292,7 @@ class UTurnBasedMovementComponent : UActorComponent
         StoppedTimeEnd = StoppedTimeEnd + CachedGameState.NormalizedTurnProgress - StoppedTimeStart;
 
         MovementState = EShipMovementState::Moving;
+        OnPickupEnd.Broadcast();
     }
 
     // ==================================================================
@@ -707,7 +714,7 @@ class UTurnBasedMovementComponent : UActorComponent
         if (CandidateItems.Num() > 0 && PathSpline != nullptr)
         {
             float SplineLength = PathSpline.GetSplineLength();
-            
+
             // 1. Identify Reachable Windows for the CURRENT turn segment
             for (AActor Item : CandidateItems)
             {
@@ -851,10 +858,10 @@ class UTurnBasedMovementComponent : UActorComponent
         if (Stop.PendingItems.Num() == 0)
             return false;
 
-        // Always allow stops at the very end of the spline path
+        // Never allow stops at the very end of the spline path
         const float EndOfSplineTolerance = 10.0;
         if (Stop.StopDistance >= TotalSplineLength - EndOfSplineTolerance)
-            return true;
+            return false;
 
         // Check if at least ONE item in this stop is perpendicular or behind the stop position
         const float PerpendicularTolerance = 5.0;
