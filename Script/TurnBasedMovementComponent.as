@@ -697,7 +697,7 @@ class UTurnBasedMovementComponent : UActorComponent
         if (Item == nullptr)
             return false;
 
-        if (CurrentTurnState.BeamQueue.Contains(Item)) return true;
+        //if (CurrentTurnState.BeamQueue.Contains(Item)) return true;
         for (const FBeamState& Beam : CurrentTurnState.ActiveBeams)
         {
             if (Beam.Item == Item)
@@ -723,6 +723,8 @@ class UTurnBasedMovementComponent : UActorComponent
             float OptDist = GetClosestSplineDist(ItemLoc);
             float ActualDist = ItemLoc.Distance(
                 PathSpline.GetLocationAtDistanceAlongSpline(OptDist, ESplineCoordinateSpace::World));
+
+            Print(f"{ActualDist}");
 
             if (ActualDist > TractorBeamRadius)
                 continue;
@@ -754,10 +756,16 @@ class UTurnBasedMovementComponent : UActorComponent
         Windows.Sort(); // ascending OptDist -- the order the ship actually meets them in
 
         const float MaxSpan = ProximityAlpha * TractorBeamRadius;
+        
+        // NEW: The maximum allowable distance between two consecutive items. 
+        // If an item is further than this from the previous one, force a new stop.
+        // (A good starting value is 20-30% of your tractor beam radius).
+        const float MaxGap = TractorBeamRadius * 0.15f; 
 
         FStopEvent Current;
         float Lo = 0.0, Hi = 0.0;
         float MinOpt = 0.0, MaxOpt = 0.0;
+        float LastOpt = 0.0; // NEW: Tracks the previous item's distance
 
         for (const FItemWindow& Win : Windows)
         {
@@ -765,9 +773,10 @@ class UTurnBasedMovementComponent : UActorComponent
             {
                 Lo = Win.Entry;  Hi = Win.Exit;
                 MinOpt = Win.OptDist;  MaxOpt = Win.OptDist;
+                LastOpt = Win.OptDist;
             }
             else
-            {
+            {   
                 float NewLo = Math::Max(Lo, Win.Entry);
                 float NewHi = Math::Min(Hi, Win.Exit);
                 float NewMinOpt = Math::Min(MinOpt, Win.OptDist);
@@ -775,18 +784,24 @@ class UTurnBasedMovementComponent : UActorComponent
 
                 bool bStillOverlaps = NewLo <= NewHi;
                 bool bWithinSpan = (NewMaxOpt - NewMinOpt) <= MaxSpan;
+                
+                // NEW: Does this item jump too far ahead of the previous item?
+                bool bGapTooLarge = (Win.OptDist - LastOpt) > MaxGap;
 
-                if (!bStillOverlaps || !bWithinSpan)
+                // If the item breaks ANY of the 3 rules, commit the stop and start a new one.
+                if (!bStillOverlaps || !bWithinSpan || bGapTooLarge)
                 {
                     CommitCluster(Current, Lo, Hi, MinOpt, MaxOpt, Stops);
                     Current = FStopEvent();
                     Lo = Win.Entry;  Hi = Win.Exit;
                     MinOpt = Win.OptDist;  MaxOpt = Win.OptDist;
+                    LastOpt = Win.OptDist;
                 }
                 else
                 {
                     Lo = NewLo;  Hi = NewHi;
                     MinOpt = NewMinOpt;  MaxOpt = NewMaxOpt;
+                    LastOpt = Win.OptDist;
                 }
             }
 
@@ -871,20 +886,6 @@ class UTurnBasedMovementComponent : UActorComponent
     TArray<AActor> GetPickupTargets() const
     {
         return PickupTargets;
-    }
-
-    UFUNCTION(BlueprintCallable, Category = "Pickup")
-    TArray<FVector> GetPlannedStopLocations() const
-    {
-        TArray<FVector> Locations;
-        Locations.Reserve(CurrentTurnState.RemainingPlan.Num());
-
-        for (const FStopEvent& Stop : CurrentTurnState.RemainingPlan)
-        {
-            Locations.Add(Stop.StopLocation);
-        }
-
-        return Locations;
     }
 
     // ==================================================================
