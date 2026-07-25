@@ -118,9 +118,9 @@ class UTurnBasedMovementComponent : UActorComponent
     UPROPERTY()
     FTurnState CurrentTurnState;
 
-    UPROPERTY(Category = "Pickup") float TractorBeamRadius = 1500.0;
-    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1500.0;
-    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 3;
+    UPROPERTY(Category = "Pickup") float TractorBeamRadius = 1700.0;
+    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1750.0;
+    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 1;
 
     private TArray<AActor> PickupTargets;
     private TArray<AActor> TempTargets;
@@ -756,26 +756,18 @@ class UTurnBasedMovementComponent : UActorComponent
 
         Windows.Sort(); 
 
-        const float ClusterSplitGap = 150.0f;
-
         FStopEvent Current;
         float Lo = 0.0, Hi = 0.0;
         float MinOpt = 0.0, MaxOpt = 0.0;
         float LastOpt = 0.0;
-        
-        // Tracks if our current cluster contains a highly efficient "on-path" item
-        bool bClusterHasSnapItem = false; 
 
         for (const FItemWindow& Win : Windows)
         {
-            bool bIsSnapItem = Win.ActualDist <= GameLogic::SnapCollectRadius;
-
             if (Current.PendingItems.Num() == 0)
             {
                 Lo = Win.Entry;  Hi = Win.Exit;
                 MinOpt = Win.OptDist;  MaxOpt = Win.OptDist;
                 LastOpt = Win.OptDist;
-                bClusterHasSnapItem = bIsSnapItem;
             }
             else
             {   
@@ -785,38 +777,32 @@ class UTurnBasedMovementComponent : UActorComponent
                 float NewMaxOpt = Math::Max(MaxOpt, Win.OptDist);
 
                 bool bStillOverlaps = NewLo <= NewHi;
-                bool bGapTooLarge = (Win.OptDist - LastOpt) > ClusterSplitGap;
-                
-                bool bWillHaveSnapItem = bClusterHasSnapItem || bIsSnapItem;
-                
-                bool bRuinsSnap = bWillHaveSnapItem && ((NewMaxOpt - NewMinOpt) > GameLogic::SnapCollectRadius);
+                bool bGapTooLarge = (Win.OptDist - LastOpt) > GameLogic::ClusterSplitGap;
 
-                if (!bStillOverlaps || bGapTooLarge || bRuinsSnap)
+                if (!bStillOverlaps || bGapTooLarge)
                 {
-                    CommitCluster(Current, Lo, Hi, MinOpt, MaxOpt, Stops);
+                    CommitCluster(Current, Lo, Hi, Stops);
                     Current = FStopEvent();
                     Lo = Win.Entry;  Hi = Win.Exit;
                     MinOpt = Win.OptDist;  MaxOpt = Win.OptDist;
                     LastOpt = Win.OptDist;
-                    bClusterHasSnapItem = bIsSnapItem;
                 }
                 else
                 {
                     Lo = NewLo;  Hi = NewHi;
                     MinOpt = NewMinOpt;  MaxOpt = NewMaxOpt;
                     LastOpt = Win.OptDist;
-                    bClusterHasSnapItem = bWillHaveSnapItem;
                 }
             }
 
             Current.PendingItems.Add(Win.Item);
         }
 
-        CommitCluster(Current, Lo, Hi, MinOpt, MaxOpt, Stops);
+        CommitCluster(Current, Lo, Hi, Stops);
         return Stops;
     }
 
-    private void CommitCluster(FStopEvent& Cluster, float Lo, float Hi, float MinOpt, float MaxOpt, TArray<FStopEvent>& OutStops)
+    private void CommitCluster(FStopEvent& Cluster, float Lo, float Hi, TArray<FStopEvent>& OutStops)
     {
         if (Cluster.PendingItems.Num() == 0)
             return;
@@ -834,7 +820,7 @@ class UTurnBasedMovementComponent : UActorComponent
 
             // Inverse weight: Closer to path = Exponentially more influence over stop location.
             // (+1.0f prevents divide by zero).
-            float Weight = 1.0f / Math::Max(ItemActualDist, 1.0f);
+            float Weight = 1.0f / Math::Max(ItemActualDist - GameLogic::SnapCollectRadius, 1.0f);
 
             SumWeightedOpt += DistAlongSpline * Weight;
             SumWeights += Weight;
