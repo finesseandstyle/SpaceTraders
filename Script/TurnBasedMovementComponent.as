@@ -73,6 +73,7 @@ struct FItemWindow
     float Entry;
     float Exit;
     float OptDist;
+    float ActualDist;
 
     int opCmp(const FItemWindow& Other) const
     {
@@ -84,8 +85,6 @@ struct FItemWindow
         return 0;
     }
 };
-
-const float ProximityAlpha = 0.4;
 
 class UTurnBasedMovementComponent : UActorComponent
 {
@@ -121,7 +120,7 @@ class UTurnBasedMovementComponent : UActorComponent
 
     UPROPERTY(Category = "Pickup") float TractorBeamRadius = 1500.0;
     UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1500.0;
-    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 1;
+    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 3;
 
     private TArray<AActor> PickupTargets;
     private TArray<AActor> TempTargets;
@@ -659,6 +658,7 @@ class UTurnBasedMovementComponent : UActorComponent
             return;
 
         PickupTargets.Add(ItemActor);
+        TempTargets.Remove(ItemActor);
         PC.OnItemPickedUp.AddUFunction(this, n"HandleItemPickedUp");
         ItemActor.OnDestroyed.AddUFunction(this, n"HandleItemDestroyed");
     }
@@ -697,7 +697,7 @@ class UTurnBasedMovementComponent : UActorComponent
         if (Item == nullptr)
             return false;
 
-        //if (CurrentTurnState.BeamQueue.Contains(Item)) return true;
+        if (CurrentTurnState.BeamQueue.Contains(Item)) return true;
         for (const FBeamState& Beam : CurrentTurnState.ActiveBeams)
         {
             if (Beam.Item == Item)
@@ -741,6 +741,7 @@ class UTurnBasedMovementComponent : UActorComponent
             Win.Entry = Entry;
             Win.Exit = Exit;
             Win.OptDist = OptDist;
+            Win.ActualDist = ActualDist;
             Windows.Add(Win);
         }
 
@@ -753,27 +754,28 @@ class UTurnBasedMovementComponent : UActorComponent
         if (Windows.Num() == 0)
             return Stops;
 
-        Windows.Sort(); // ascending OptDist -- the order the ship actually meets them in
+        Windows.Sort(); 
 
-        const float MaxSpan = ProximityAlpha * TractorBeamRadius;
-        
-        // NEW: The maximum allowable distance between two consecutive items. 
-        // If an item is further than this from the previous one, force a new stop.
-        // (A good starting value is 20-30% of your tractor beam radius).
-        const float MaxGap = TractorBeamRadius * 0.15f; 
+        const float ClusterSplitGap = 150.0f;
 
         FStopEvent Current;
         float Lo = 0.0, Hi = 0.0;
         float MinOpt = 0.0, MaxOpt = 0.0;
-        float LastOpt = 0.0; // NEW: Tracks the previous item's distance
+        float LastOpt = 0.0;
+        
+        // Tracks if our current cluster contains a highly efficient "on-path" item
+        bool bClusterHasSnapItem = false; 
 
         for (const FItemWindow& Win : Windows)
         {
+            bool bIsSnapItem = Win.ActualDist <= GameLogic::SnapCollectRadius;
+
             if (Current.PendingItems.Num() == 0)
             {
                 Lo = Win.Entry;  Hi = Win.Exit;
                 MinOpt = Win.OptDist;  MaxOpt = Win.OptDist;
                 LastOpt = Win.OptDist;
+                bClusterHasSnapItem = bIsSnapItem;
             }
             else
             {   
@@ -783,25 +785,27 @@ class UTurnBasedMovementComponent : UActorComponent
                 float NewMaxOpt = Math::Max(MaxOpt, Win.OptDist);
 
                 bool bStillOverlaps = NewLo <= NewHi;
-                bool bWithinSpan = (NewMaxOpt - NewMinOpt) <= MaxSpan;
+                bool bGapTooLarge = (Win.OptDist - LastOpt) > ClusterSplitGap;
                 
-                // NEW: Does this item jump too far ahead of the previous item?
-                bool bGapTooLarge = (Win.OptDist - LastOpt) > MaxGap;
+                bool bWillHaveSnapItem = bClusterHasSnapItem || bIsSnapItem;
+                
+                bool bRuinsSnap = bWillHaveSnapItem && ((NewMaxOpt - NewMinOpt) > GameLogic::SnapCollectRadius);
 
-                // If the item breaks ANY of the 3 rules, commit the stop and start a new one.
-                if (!bStillOverlaps || !bWithinSpan || bGapTooLarge)
+                if (!bStillOverlaps || bGapTooLarge || bRuinsSnap)
                 {
                     CommitCluster(Current, Lo, Hi, MinOpt, MaxOpt, Stops);
                     Current = FStopEvent();
                     Lo = Win.Entry;  Hi = Win.Exit;
                     MinOpt = Win.OptDist;  MaxOpt = Win.OptDist;
                     LastOpt = Win.OptDist;
+                    bClusterHasSnapItem = bIsSnapItem;
                 }
                 else
                 {
                     Lo = NewLo;  Hi = NewHi;
                     MinOpt = NewMinOpt;  MaxOpt = NewMaxOpt;
                     LastOpt = Win.OptDist;
+                    bClusterHasSnapItem = bWillHaveSnapItem;
                 }
             }
 
@@ -817,11 +821,29 @@ class UTurnBasedMovementComponent : UActorComponent
         if (Cluster.PendingItems.Num() == 0)
             return;
 
-        // Midpoint of the OptDist range minimizes the *worst* pull distance in the
-        // cluster -- that's what sets stop duration when beams run sequentially,
-        // not the mean.
-        float Midpoint = (MinOpt + MaxOpt) * 0.5;
-        float ClampedStopDist = Math::Clamp(Midpoint, Math::Max(Lo, StartDistance), Math::Min(Hi, EndDistance));
+        float SumWeightedOpt = 0.0;
+        float SumWeights = 0.0;
+
+        for (AActor Item : Cluster.PendingItems)
+        {
+            float DistAlongSpline = GetClosestSplineDist(GetItemLocation(Item));
+            FVector SplineLoc = PathSpline.GetLocationAtDistanceAlongSpline(DistAlongSpline, ESplineCoordinateSpace::World);
+            
+            // Find how far the item is perpendicularly from the path
+            float ItemActualDist = GetItemLocation(Item).Distance(SplineLoc);
+
+            // Inverse weight: Closer to path = Exponentially more influence over stop location.
+            // (+1.0f prevents divide by zero).
+            float Weight = 1.0f / Math::Max(ItemActualDist, 1.0f);
+
+            SumWeightedOpt += DistAlongSpline * Weight;
+            SumWeights += Weight;
+        }
+
+        // Weighted mean anchors the stop heavily to items right next to the spline
+        float WeightedMeanOpt = SumWeightedOpt / SumWeights;
+
+        float ClampedStopDist = Math::Clamp(WeightedMeanOpt, Math::Max(Lo, StartDistance), Math::Min(Hi, EndDistance));
 
         Cluster.StopDistance = ClampedStopDist;
         Cluster.StopLocation = PathSpline.GetLocationAtDistanceAlongSpline(Cluster.StopDistance, ESplineCoordinateSpace::World);
@@ -869,8 +891,8 @@ class UTurnBasedMovementComponent : UActorComponent
             }
         }
 
-        if (CurrentTurnState.BeamQueue.Num() > 0)
-        {
+        if (CurrentTurnState.BeamQueue.Num() > 0 || CurrentTurnState.ActiveBeams.Num() > 0)
+         {
             bImmediatePickup = true;
         }
         else if (CurrentTurnState.RemainingPlan.Num() > 0)

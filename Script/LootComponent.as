@@ -1,8 +1,5 @@
 event void FOnItemPickedUp(AActor LootObject, FGameItem Item);
 
-const float SnapCollectRadius = 20.0;
-const float ContestHysteresis = 1.5;
-
 class ULootComponent : UActorComponent
 {
     // -------------------------------------------------------------------------
@@ -57,7 +54,7 @@ class ULootComponent : UActorComponent
             return true;
         }
 
-        if (Score > CurrentPullerScore * ContestHysteresis)
+        if (Score > CurrentPullerScore * GameLogic::ContestHysteresis)
         {
             CurrentPuller = BiddingShip;
             CurrentPullerScore = Score;
@@ -96,7 +93,7 @@ class ULootComponent : UActorComponent
         const float Dist2D = FVector2D(ItemLocation.X, ItemLocation.Y).Distance(FVector2D(ShipLocation.X, ShipLocation.Y));
 
         const float FullStep2D = PullSpeed * DeltaTime;
-        const float DistanceToBoundary = Dist2D - SnapCollectRadius;
+        const float DistanceToBoundary = Dist2D - GameLogic::SnapCollectRadius;
 
         if (FullStep2D >= DistanceToBoundary)
         {
