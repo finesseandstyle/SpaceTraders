@@ -583,7 +583,7 @@ DEFINE_FUNCTION(UGameUtility::execGetNRandomItems)
     }
 }
 
-const UItemFragment* UGameUtility::GetItemFragment(TArray<UItemFragment*> Fragments,
+const UItemFragment* UGameUtility::GetItemFragment(TArray<UItemFragment*>& Fragments,
 	const TSubclassOf<UItemFragment>& FragmentType)
 {
 	for (const auto Fragment : Fragments)
@@ -595,6 +595,21 @@ const UItemFragment* UGameUtility::GetItemFragment(TArray<UItemFragment*> Fragme
 	}
 
 	return nullptr;
+}
+
+TArray<UItemFragment*> UGameUtility::GetItemFragments(TArray<UItemFragment*>& Fragments,
+                                                      const TSubclassOf<UItemFragment>& FragmentType)
+{
+	TArray<UItemFragment*> NewFragments;
+	for (const auto Fragment : Fragments)
+	{
+		if (Fragment && Fragment->IsA(FragmentType))
+		{
+			NewFragments.Add(Fragment);
+		}
+	}
+
+	return NewFragments;
 }
 
 // Keep the stub empty since CustomThunk uses execGetNRandomItems

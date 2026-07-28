@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Item.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "GameUtility.generated.h"
 
@@ -149,6 +150,11 @@ public:
 
 	static void GenericGetNRandomItems(void* TargetArrayAddr, const FArrayProperty* TargetArrayProperty, int32 NumberToGet, void* OutArrayAddr, const FArrayProperty* OutArrayProperty);
 	
+	//Returns the first fragment of selected type
 	UFUNCTION(BlueprintCallable, meta = (DeterminesOutputType = "FragmentType"))
-	static const UItemFragment* GetItemFragment(TArray<UItemFragment*> Fragments, const TSubclassOf<UItemFragment>& FragmentType);
+	static const UItemFragment* GetItemFragment(TArray<UItemFragment*>& Fragments, const TSubclassOf<UItemFragment>& FragmentType);
+	//Returns every fragment of selected type
+	UFUNCTION(BlueprintCallable, meta = (DeterminesOutputType = "FragmentType"))
+	TArray<UItemFragment*> GetItemFragments(TArray<UItemFragment*>& Fragments,
+	                                        const TSubclassOf<UItemFragment>& FragmentType);
 };

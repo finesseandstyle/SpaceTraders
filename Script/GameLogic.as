@@ -1,3 +1,24 @@
+//Used inside the target's state function
+struct FDamageCalculationInput
+{
+    UPROPERTY() float UnmitigatedDamage = 0.0;
+    UPROPERTY() float ShieldBypass              = 0.0; // 0-1, from FWeaponProperties
+    UPROPERTY() float CurrentShieldPoints       = 0.0;
+    UPROPERTY() bool  bShieldsActive            = true;
+    UPROPERTY() float ShieldDamageBlock         = 0.0; // from FShieldGeneratorProperties
+    UPROPERTY() float ShipDamageResistance      = 1.0; // armor
+    UPROPERTY() float TypeSpecificResistance    = 1.0; // Kinetic/Energetic/Explosive, picked by caller
+    UPROPERTY() float GlobalDamageModifier      = 1.0; // from attacker's GlobalDamage.* bonuses
+    UPROPERTY() bool  bIsInvulnerable           = false;
+};
+
+struct FDamageCalculationOutput
+{
+    UPROPERTY() float ShieldDamage = 0.0;
+    UPROPERTY() float HullDamage = 0.0;
+};
+
+
 namespace GameLogic
 {
     const float StatScale = 6.0;
@@ -14,26 +35,7 @@ namespace GameLogic
     const float ContestHysteresis = 1.5;  //How much bigger an opposing actor's score need to be to claim an item.
     const float ClusterSplitGap = 140.0;  // If the empty space between two items is larger than this, split the stop.
 
-    //Used inside the target's state function
-    struct FDamageCalculationInput
-    {
-        UPROPERTY() float UnmitigatedDamage = 0.0;
-        UPROPERTY() float ShieldBypass              = 0.0; // 0-1, from FWeaponProperties
-        UPROPERTY() float CurrentShieldPoints       = 0.0;
-        UPROPERTY() bool  bShieldsActive            = true;
-        UPROPERTY() float ShieldDamageBlock         = 0.0; // from FShieldGeneratorProperties
-        UPROPERTY() float ShipDamageResistance      = 1.0; // armor
-        UPROPERTY() float TypeSpecificResistance    = 1.0; // Kinetic/Energetic/Explosive, picked by caller
-        UPROPERTY() float GlobalDamageModifier      = 1.0; // from attacker's GlobalDamage.* bonuses
-        UPROPERTY() bool  bIsInvulnerable           = false;
-    };
-
-    struct FDamageCalculationOutput
-    {
-        UPROPERTY() float ShieldDamage = 0.0;
-        UPROPERTY() float HullDamage = 0.0;
-    };
-
+    
 
     // ── Accuracy/Evasion-biased damage roll ───────────────────────────────────────
     // Ported directly from the GAS prototype's RangeIncrement/RangeSize/Lerp
@@ -142,47 +144,90 @@ namespace GameLogic
     float GetShipSpeed(float ShipMaxSpeed, float ShipMass, float SlowdownMultiplier, float ShipReliability, 
         float AccelerationMultipliers, float FlatBonuses, bool bIsAfterburnerActive)
     {
-        float k_weight = Math::GetMappedRangeValueClamped(FVector2D(750.0f, 2500.0f), FVector2D(1.0f, 0.333f), ShipMass);
-        float k_slowdown = Math::Clamp(SlowdownMultiplier, 0.5f, 1.0f);
-        float k_broken = Math::Clamp(ShipReliability, 0.3f,1.0f);
+        float k_weight = Math::GetMappedRangeValueClamped(FVector2D(750.0, 2500.0), FVector2D(1.0, 0.333), ShipMass);
+        float k_slowdown = Math::Clamp(SlowdownMultiplier, 0.5f, 1.0);
+        float k_broken = Math::Clamp(ShipReliability, 0.3f,1.0);
 
         // SpeedKoef = e^(-4thRoot( Sum( ln^4(k_i) ) ))
-        float SumLn4 = Math::Pow(Math::Loge(k_weight), 4.0f);
-        SumLn4 += Math::Pow(Math::Loge(k_slowdown), 4.0f);
-        SumLn4 += Math::Pow(Math::Loge(k_broken), 4.0f);
+        float SumLn4 = Math::Pow(Math::Loge(k_weight), 4.0);
+        SumLn4 += Math::Pow(Math::Loge(k_slowdown), 4.0);
+        SumLn4 += Math::Pow(Math::Loge(k_broken), 4.0);
 
-        float SpeedKoef = Math::Exp(-Math::Pow(SumLn4, 0.25f));
+        float SpeedKoef = Math::Exp(-Math::Pow(SumLn4, 0.25));
         
         //Flat bonuses before scaling
         float RawSpeed = (ShipMaxSpeed * SpeedKoef * AccelerationMultipliers) + FlatBonuses;
 
         if (bIsAfterburnerActive)
         {
-            RawSpeed *= 2.0f;
+            RawSpeed *= 2.0;
         }
 
         float FinalSpeed = RawSpeed;
 
         //The hardcoded speed values represent the brackets at which a calculated speed 
         //might fall into so that the speed is never reduced at any point.
-        if (RawSpeed < 200.0f)
+        if (RawSpeed < 200.0)
         {
-            FinalSpeed = 200.0f - (200.0f - RawSpeed) * 0.2f;
+            FinalSpeed = 200.0 - (200.0 - RawSpeed) * 0.2;
         }
-        else if (RawSpeed > 2000.0f)
+        else if (RawSpeed > 2000.0)
         {
-            FinalSpeed = 1600.0f + (RawSpeed - 2000.0f) * 0.2f;
+            FinalSpeed = 1600.0 + (RawSpeed - 2000.0) * 0.2;
         }
-        else if (RawSpeed > 1500.0f)
+        else if (RawSpeed > 1500.0)
         {
-            FinalSpeed = 1350.0f + (RawSpeed - 1500.0f) * 0.5f;
+            FinalSpeed = 1350.0 + (RawSpeed - 1500.0) * 0.5;
         }
-        else if (RawSpeed > 1000.0f)
+        else if (RawSpeed > 1000.0)
         {
-            FinalSpeed = 1000.0f + (RawSpeed - 1000.0f) * 0.7f;
+            FinalSpeed = 1000.0 + (RawSpeed - 1000.0) * 0.7;
         }
 
         return FinalSpeed;
+    }
+
+    // Folds every modifier matching StatTag onto BaseValue.
+    //   Additive        -> summed first
+    //   Multiplicative   -> applied as (1 + Value) factors on top of the additive sum
+    //   Override         -> if any Override is present it wins outright, ignoring
+    //                        every other modifier (matches EStatType's own comment)
+    float ApplyModifiers(float BaseValue, FGameplayTag StatTag, const TArray<FStatModifier>& Modifiers)
+    {
+        float AdditiveSum = 0.0;
+        float MultiplicativeFactor = 1.0;
+        bool bHasOverride = false;
+        float OverrideValue = 0.0;
+
+        for (const auto& Modifier : Modifiers)
+        {
+            if (Modifier.StatTag != StatTag)
+                continue;
+
+            switch (Modifier.Type)
+            {
+                case EStatType::Additive:
+                    AdditiveSum += Modifier.Value;
+                    break;
+                case EStatType::Multiplicative:
+                    MultiplicativeFactor *= (1.0 + Modifier.Value);
+                    break;
+                case EStatType::Override:
+                    bHasOverride = true;
+                    OverrideValue = Modifier.Value;
+                    break;
+            }
+        }
+
+        if (bHasOverride)
+            return OverrideValue;
+
+        return BaseValue * MultiplicativeFactor + AdditiveSum;
+    }
+
+    float GetHullMass(float TotalCarryCapacity, int TechLevel)
+    {
+        return Math::RoundToFloat(TotalCarryCapacity * (0.6 + 0.03 * (TechLevel - 1)));
     }
 
 }

@@ -119,7 +119,7 @@ class UTurnBasedMovementComponent : UActorComponent
     FTurnState CurrentTurnState;
 
     UPROPERTY(Category = "Pickup") float TractorBeamRadius = 700.0;
-    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 500.0;
+    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 750.0;
     UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 1;
 
     private TArray<AActor> PickupTargets;
