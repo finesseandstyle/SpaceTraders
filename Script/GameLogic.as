@@ -48,6 +48,8 @@ namespace GameLogic
         float NewMinDamage = Math::Max(MinDamage, 0);
         float NewMaxDamage = Math::Max(MaxDamage, 0);
 
+        Print(f"{MinDamage}-{MaxDamage}");
+
         //Special case for weapons with a fixed damage value
         if (NewMinDamage == 0) return MaxDamage;
 

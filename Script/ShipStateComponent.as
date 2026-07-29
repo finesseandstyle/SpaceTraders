@@ -12,18 +12,7 @@
 //     (and doubles as the way to install the very first one).
 //   - Every other equipment slot (Weapon_1..N, ShieldGenerator, FuelTank, ...)
 //     is granted by the equipped hull's OpenSlots the moment SwapItem installs
-//     it - see GrantSlotsFromHull(). This step went missing when the old
-//     multi-hull generalization was removed; it's back in a form that assumes
-//     a single hull.
-//   - NOT YET WIRED UP: the fixed Artifact socket slots (SpaceShip_Equipment_Artifact_*).
-//     Per your note these aren't extra hulls - they're a flat cap on artifact-tagged
-//     items per equipment category (2 for hull, 2 for the weapon system, 1 each
-//     for everything else), independent of which hull is equipped. Happy to add
-//     a GrantArtifactSlots()-style step once I know how you want those exposed
-//     (as literal EquipmentSlots keys like the main slots, or tracked separately).
-//   - All pure-math functions (stat modifiers + damage calc) now live under a
-//     single GameLogic:: namespace, split across ShipCombatMath.as and
-//     StatUtility.as (Angelscript namespaces reopen across files fine).
+//     it - see GrantSlotsFromHull().
 //   - Weapon damage bonuses (DamageGlobal, DamageKinetic/Energetic/Explosive)
 //     are NOT part of CachedShipStats. A ship can carry several weapons with
 //     different base MaxDamage and different DamageTypes, and a Multiplicative
@@ -152,6 +141,12 @@ class UShipStateComponent : UActorComponent
 
         EquipmentSlots.Add(SlotTag, Item);
 
+        auto EquipmentFrag = Item.GetEquipmentFragment();
+        for (FStatModifier Modifier : EquipmentFrag.GlobalModifiers)
+        {
+            AddGlobalModifierStat(Modifier);
+        }
+
         MarkStatsDirty();
         //Print(f"Equipped {SlotTag.ToString()}");
         return true;
@@ -168,6 +163,12 @@ class UShipStateComponent : UActorComponent
         {
             Removed = EquipmentSlots[SlotTag];
             EquipmentSlots.Remove(SlotTag); // Completely remove entry on unequip
+
+            auto EquipmentFrag = Removed.GetEquipmentFragment();
+            for (FStatModifier Modifier : EquipmentFrag.GlobalModifiers)
+            {
+                RemoveGlobalModifiers(Modifier);
+            }
 
             if (Removed.IsValid())
                 CargoHold.Add(Removed);
@@ -204,6 +205,21 @@ class UShipStateComponent : UActorComponent
 
         if (Previous.IsValid())
             CargoHold.Add(Previous);
+
+        auto PrevEquipmentFrag = Previous.GetEquipmentFragment();
+        if (PrevEquipmentFrag != nullptr)
+        {
+            for (FStatModifier Modifier : PrevEquipmentFrag.GlobalModifiers)
+            {
+                RemoveGlobalModifiers(Modifier);
+            }
+        }
+
+        auto EquipmentFrag = NewItem.GetEquipmentFragment();
+        for (FStatModifier Modifier : EquipmentFrag.GlobalModifiers)
+        {
+            AddGlobalModifierStat(Modifier);
+        }
 
         MarkStatsDirty();
         return Previous;
@@ -805,7 +821,7 @@ class UShipStateComponent : UActorComponent
         float Dur2 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
         Print(f"MaxDur:{Dur1}->{Dur2}\nCurrentDur:{Fragment.CurrentDurability}");
 
-        AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Positive_DamageKinetic, EStatType::Multiplicative, 2.4);
+        AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Positive_DamageKinetic, EStatType::Additive, 10);
         
         SwapItem(GameplayTags::SpaceShip_Equipment_Hull, InstantiateItem(TestHullDefinition));
     
