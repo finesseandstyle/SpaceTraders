@@ -18,6 +18,11 @@ struct FDamageCalculationOutput
     UPROPERTY() float HullDamage = 0.0;
 };
 
+struct FModifierComponents
+{
+    UPROPERTY() float MultiplicativeFactor = 1.0;
+    UPROPERTY() float AdditiveSum = 0.0;
+}
 
 namespace GameLogic
 {
@@ -206,6 +211,7 @@ namespace GameLogic
                     AdditiveSum += Modifier.Value;
                     break;
                 case EStatType::Multiplicative:
+                    //Needs a debate whether percentage modifiers are additive or multiplicative (rn it's mult)
                     MultiplicativeFactor *= (1.0 + Modifier.Value);
                     break;
                 case EStatType::Override:
@@ -260,12 +266,6 @@ namespace GameLogic
     // rather than just adding them to one number - e.g. GetShipSpeed, where
     // MultiplierBonuses multiplies against SpeedKoef and FlatBonuses is only
     // added at the very end.
-    struct FModifierComponents
-    {
-        float MultiplicativeFactor = 1.0;
-        float AdditiveSum = 0.0;
-    }
-
     FModifierComponents GetModifierComponents(FGameplayTag StatTag, const TArray<FStatModifier>& Modifiers)
     {
         FModifierComponents Result;

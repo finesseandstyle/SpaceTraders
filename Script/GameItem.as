@@ -307,6 +307,7 @@ enum EStatType
 
 struct FStatModifier
 {
+    //Purely for bookkeping
     UPROPERTY() FGameplayTag SourceType; //Upgrade, Micromodule1/2, Acrine, Artifact, Active Effects like Stimulants, etc.
     UPROPERTY() FGameplayTag StatTag; //Engine Speed, Radar Range, Weapon Max Damage, the actual stat type
     UPROPERTY() EStatType Type;
