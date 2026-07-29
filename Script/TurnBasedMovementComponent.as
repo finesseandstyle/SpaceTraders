@@ -119,7 +119,7 @@ class UTurnBasedMovementComponent : UActorComponent
     FTurnState CurrentTurnState;
 
     UPROPERTY(Category = "Pickup") float TractorBeamRadius = 700.0;
-    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 750.0;
+    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1500.0;
     UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 1;
 
     private TArray<AActor> PickupTargets;
@@ -768,7 +768,7 @@ class UTurnBasedMovementComponent : UActorComponent
                 float NewHi = Math::Min(Hi, Win.Exit);
 
                 bool bStillOverlaps = NewLo <= NewHi;
-                bool bGapTooLarge = (Win.OptDist - LastOpt) > GameLogic::ClusterSplitGap;
+                bool bGapTooLarge = (Win.OptDist - LastOpt) > GameLogic::ClusterSplitGap * Math::Max(MaxSimultaneousPickups * 0.5, 1);
 
                 if (!bStillOverlaps || bGapTooLarge)
                 {

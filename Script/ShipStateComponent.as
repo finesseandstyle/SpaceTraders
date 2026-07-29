@@ -4,23 +4,39 @@
 // Attached to any ship or space station actor. Owns equipment, cargo,
 // the aggregated ship-wide stat cache, and the three stats that change
 // during turn execution: Hull Points, Shield Points, Heat.
+// This is the main application of our Attribute-Ability System (AAS)
 //
-// Assumptions about the surrounding project (adjust if these don't match):
-//   - RollWeaponDamage / CalculateDamage / GetReliabilitySpeedMultiplier /
-//     CalculateTargetEnergyBuildup / FDamageCalculationInput / Output are
-//     declared globally in your existing damage-math file and are visible
-//     here without an explicit import (Angelscript module-wide resolution).
-//   - GameplayTags::TagName is how native gameplay tags are exposed to
-//     script, matching the convention already used in ItemSystem.as
-//     (GameplayTags::StatSource_Upgrade, etc).
-//   - Slot tags such as SpaceShip_Equipment_Weapon_1 are real dot-hierarchy
-//     children of SpaceShip_Equipment_Weapon (i.e. the tag's actual name is
-//     "SpaceShip.Equipment.Weapon.Weapon_1"), so FGameplayTag::MatchesTag()
-//     can be used for slot/item-type compatibility checks. If your tags are
-//     flat instead, swap IsItemCompatibleWithSlot() for an explicit
-//     slot -> accepted-ItemType lookup table.
-//   - Print(FString) is your project's quick debug-log function; swap it in
-//     RunSelfTest() for whatever you actually use.
+// Design notes reflecting the latest round of changes:
+//   - Exactly one hull, always present, always at GameplayTags::SpaceShip_Equipment_Hull.
+//     UnequipItem refuses that slot; SwapItem is the only way to replace it
+//     (and doubles as the way to install the very first one).
+//   - Every other equipment slot (Weapon_1..N, ShieldGenerator, FuelTank, ...)
+//     is granted by the equipped hull's OpenSlots the moment SwapItem installs
+//     it - see GrantSlotsFromHull(). This step went missing when the old
+//     multi-hull generalization was removed; it's back in a form that assumes
+//     a single hull.
+//   - NOT YET WIRED UP: the fixed Artifact socket slots (SpaceShip_Equipment_Artifact_*).
+//     Per your note these aren't extra hulls - they're a flat cap on artifact-tagged
+//     items per equipment category (2 for hull, 2 for the weapon system, 1 each
+//     for everything else), independent of which hull is equipped. Happy to add
+//     a GrantArtifactSlots()-style step once I know how you want those exposed
+//     (as literal EquipmentSlots keys like the main slots, or tracked separately).
+//   - All pure-math functions (stat modifiers + damage calc) now live under a
+//     single GameLogic:: namespace, split across ShipCombatMath.as and
+//     StatUtility.as (Angelscript namespaces reopen across files fine).
+//   - Weapon damage bonuses (DamageGlobal, DamageKinetic/Energetic/Explosive)
+//     are NOT part of CachedShipStats. A ship can carry several weapons with
+//     different base MaxDamage and different DamageTypes, and a Multiplicative
+//     modifier on "DamageGlobal" only means something relative to each
+//     individual weapon's own MaxDamage - there's no single ship-wide number
+//     that's correct for all of them. Instead there's a second, per-weapon
+//     cache (CachedWeaponMaxDamage, keyed by slot tag) rebuilt alongside the
+//     main one - see RecalculateWeaponDamageCache() and GameLogic::ApplyModifierGroup.
+//   - Slot tags such as SpaceShip_Equipment_Weapon_1 are assumed to be real
+//     dot-hierarchy children of SpaceShip_Equipment_Weapon, so
+//     FGameplayTag::MatchesTag() works for slot/item-type compatibility.
+//   - Print(FString) / f-strings are used per your RunSelfTest edit - swap if
+//     your project's debug logging differs.
 // ============================================================================
 
 event void FShipHullDestroyed(UShipStateComponent Ship);
@@ -29,14 +45,12 @@ event void FShipShieldsDepleted(UShipStateComponent Ship);
 
 class UShipStateComponent : UActorComponent
 {
-    // ------------------------------------------------------------------
-    // Equipment & inventory
-    // ------------------------------------------------------------------
-
     // Every slot this ship currently has, keyed by its gameplay tag
     // (SpaceShip_Equipment_Weapon_1, SpaceShip_Equipment_ShieldGenerator, ...).
-    UPROPERTY() FGameItem Hull = FGameItem();
+    // GameplayTags::SpaceShip_Equipment_Hull is populated the first time
+    // SwapItem() is called and stays populated forever after - see SwapItem.
     UPROPERTY() TMap<FGameplayTag, FGameItem> EquipmentSlots;
+    UPROPERTY() FGameplayTag Faction;
 
     // General cargo hold: trade goods, spare unequipped gear, etc.
     UPROPERTY() TArray<FGameItem> CargoHold;
@@ -56,6 +70,13 @@ class UShipStateComponent : UActorComponent
 
     // Transient - not saved, rebuilt from the above whenever it's stale.
     private TMap<FGameplayTag, float> CachedShipStats;
+
+    // Transient, keyed by weapon slot tag - each weapon's MaxDamage after
+    // DamageGlobal/DamageType bonuses are folded in. Kept separate from
+    // CachedShipStats since these bonuses resolve per-weapon, not ship-wide -
+    // see the file header and RecalculateWeaponDamageCache().
+    private TMap<FGameplayTag, float> CachedWeaponMaxDamage;
+
     private bool bStatsDirty = true;
 
     // ------------------------------------------------------------------
@@ -65,6 +86,7 @@ class UShipStateComponent : UActorComponent
     // Hull Points are NOT duplicated here - they live on the equipped hull's
     // CurrentDurability/MaxDurability. See GetCurrentHullPoints/GetMaxHullPoints.
 
+    UPROPERTY() float CurrentMass = 0.0;
     UPROPERTY() float CurrentShieldPoints = 0.0;
     UPROPERTY() bool bShieldsActive = true; // toggled once per turn by the player, like a stance
     UPROPERTY() int32 TurnsSinceShieldDamage = 0;
@@ -73,20 +95,25 @@ class UShipStateComponent : UActorComponent
     UPROPERTY() float CurrentHeat = 0.0;
     UPROPERTY() bool bIsOverheated = false;
 
-    // ------------------------------------------------------------------
-    // Events
-    // ------------------------------------------------------------------
-
     UPROPERTY() FShipHullDestroyed OnHullDestroyed;
     UPROPERTY() FShipOverheated OnOverheated;
     UPROPERTY() FShipShieldsDepleted OnShieldsDepleted;
 
-    // ==================================================================
-    // Slot management
-    // ==================================================================
+
+    // Helper to query whether a slot is currently open on this ship
+    bool IsOpenSlot(FGameplayTag SlotTag)
+    {
+        //Slots that must always be open
+        if (SlotTag == GameplayTags::SpaceShip_Equipment_Hull)
+            return true;
+
+        UItemHull HullFragment = GetHullFragment();
+        return HullFragment != nullptr && HullFragment.OpenSlots.HasTagExact(SlotTag);
+    }
 
     bool IsSlotEmpty(FGameplayTag SlotTag)
     {
+        // Slot is empty if no item entry exists in the map
         return !EquipmentSlots.Contains(SlotTag);
     }
 
@@ -108,35 +135,81 @@ class UShipStateComponent : UActorComponent
     UFUNCTION()
     bool EquipItem(FGameplayTag SlotTag, FGameItem Item)
     {
-        if (!EquipmentSlots.Contains(SlotTag))
-            return false; // no hull currently grants this slot
+        if (SlotTag == GameplayTags::SpaceShip_Equipment_Hull)
+            return false;
+
+        // Ensure the equipped hull actually provides this open slot
+        if (!IsOpenSlot(SlotTag))
+        {
+            Print(f"Couldn't equip {SlotTag.ToString()}");
+            return false;
+        }
 
         if (!IsItemCompatibleWithSlot(SlotTag, Item))
             return false;
 
-        UnequipItem(SlotTag); // whatever was there goes back to cargo first
+        UnequipItem(SlotTag); // Move any currently equipped item in this slot to cargo
 
-        EquipmentSlots[SlotTag] = Item;
+        EquipmentSlots.Add(SlotTag, Item);
 
         MarkStatsDirty();
+        //Print(f"Equipped {SlotTag.ToString()}");
         return true;
     }
 
     UFUNCTION()
     FGameItem UnequipItem(FGameplayTag SlotTag)
     {
+        if (SlotTag == GameplayTags::SpaceShip_Equipment_Hull)
+            return FGameItem();
+
         FGameItem Removed;
         if (EquipmentSlots.Contains(SlotTag))
         {
             Removed = EquipmentSlots[SlotTag];
-            EquipmentSlots[SlotTag] = FGameItem();
-            CargoHold.Add(Removed);
+            EquipmentSlots.Remove(SlotTag); // Completely remove entry on unequip
+
+            if (Removed.IsValid())
+                CargoHold.Add(Removed);
         }
+
         MarkStatsDirty();
         return Removed;
     }
 
-    UFUNCTION(BlueprintCallable)
+    // The atomic swap: removes whatever's in SlotTag and installs NewItem in
+    // the same step, so the slot is never observably empty in between. This
+    // is the only way to change the hull (UnequipItem refuses it above), and
+    // works the same way for any other slot too.
+    UFUNCTION()
+    FGameItem SwapItem(FGameplayTag SlotTag, FGameItem NewItem)
+    {
+        if (!IsItemCompatibleWithSlot(SlotTag, NewItem))
+            return FGameItem();
+
+        FGameItem Previous = GetItemInSlot(SlotTag);
+
+        if (SlotTag == GameplayTags::SpaceShip_Equipment_Hull)
+        {
+            EquipmentSlots.Add(SlotTag, NewItem);
+            GrantSlotsFromHull(); // Check for orphaned slots from old hull
+        }
+        else
+        {
+            if (!IsOpenSlot(SlotTag))
+                return FGameItem();
+
+            EquipmentSlots.Add(SlotTag, NewItem);
+        }
+
+        if (Previous.IsValid())
+            CargoHold.Add(Previous);
+
+        MarkStatsDirty();
+        return Previous;
+    }
+
+    UFUNCTION()
     bool EquipFromCargo(int32 CargoIndex, FGameplayTag SlotTag)
     {
         if (CargoIndex < 0 || CargoIndex >= CargoHold.Num())
@@ -150,14 +223,6 @@ class UShipStateComponent : UActorComponent
         return true;
     }
 
-    // ==================================================================
-    // Item instantiation
-    // ==================================================================
-
-    // Builds a runtime FGameItem from a template UItemDefinition (a Data
-    // Asset), deep-copying its fragments so this instance gets its own
-    // mutable durability/reliability/modifiers instead of sharing state
-    // with the template or with other instances of the same item.
     UFUNCTION()
     FGameItem InstantiateItem(UItemDefinition Definition, int32 Mass = 1)
     {
@@ -170,55 +235,63 @@ class UShipStateComponent : UActorComponent
 
         NewItem.Value = Definition.BasePrice;
 
+        //auto EquipmentFragment = Definition.GetFragment(Template);
+        //NewItem.Fragments.Add(EquipmentFragment);
+        
         for (const auto TemplateFragment : Definition.Fragments)
         {
             if (TemplateFragment == nullptr)
                 continue;
 
-            NewItem.Fragments.Add(InstantiateFragment(TemplateFragment));
+            NewItem.Fragments.Add(InstantiateFragment(Definition, TemplateFragment));
         }
 
         return NewItem;
     }
 
-    // Explicit field copy rather than a generic deep-copy call, so this
-    // works regardless of whether your bindings expose DuplicateObject<T>.
-    // If they do, DuplicateObject<UItemFragment>(Template, this) is a much
-    // shorter drop-in replacement for this whole function.
-    private UItemFragment InstantiateFragment(const UItemFragment Template)
+    private UItemFragment InstantiateFragment(UItemDefinition Definition, const UItemFragment Template)
     {
         if (Template == nullptr)
             return nullptr;
 
-        UItemFragment NewFragment = Cast<UItemFragment>(NewObject(this, Template.Class));
 
-        UItemEquipment TemplateEquipment = Cast<UItemEquipment>(Template);
-        UItemEquipment NewEquipment = Cast<UItemEquipment>(NewFragment);
-        if (TemplateEquipment != nullptr && NewEquipment != nullptr)
+        //IDK how else to do this
+        if (Template.IsA(UItemHull))
         {
-            NewEquipment.MaxDurability = TemplateEquipment.MaxDurability;
-            NewEquipment.CurrentDurability = NewEquipment.MaxDurability.Value;
-            NewEquipment.Reliability = TemplateEquipment.Reliability;
-            NewEquipment.TechLevel = TemplateEquipment.TechLevel;
-            NewEquipment.Stats = TemplateEquipment.Stats;         // TArray value-copy
-            NewEquipment.Modifiers = TemplateEquipment.Modifiers; // start with any baked-in modifiers
-            NewEquipment.MarkAllStatsDirty(); // force a real first calculation, ignore whatever the template had saved
+            auto Fragment = Definition.GetFragment(UItemHull);
+            auto NewFragment = Cast<UItemHull>(NewObject(this, Template.Class));
+            NewFragment.CopyScriptPropertiesFrom(Fragment);
+            return NewFragment;
         }
 
+        if (Template.IsA(UItemWeapon))
+        {
+            auto Fragment = Definition.GetFragment(UItemWeapon);
+            auto NewFragment = Cast<UItemWeapon>(NewObject(this, Template.Class));
+            NewFragment.CopyScriptPropertiesFrom(Fragment);
+            return NewFragment;
+        }
+
+        if (Template.IsA(UItemFuelTank))
+        {
+            auto Fragment = Definition.GetFragment(UItemFuelTank);
+            auto NewFragment = Cast<UItemFuelTank>(NewObject(this, Template.Class));
+            NewFragment.CopyScriptPropertiesFrom(Fragment);
+            return NewFragment;
+        }
+
+        auto Fragment = Definition.GetFragment(UItemEquipment);
+        auto NewFragment = Cast<UItemEquipment>(NewObject(this, Template.Class));
+        NewFragment.CopyScriptPropertiesFrom(Fragment);
         return NewFragment;
     }
-
-    // ==================================================================
-    // Stat aggregation (Level 2 - see UItemEquipment::RecalculateStats
-    // in ItemSystem.as for Level 1)
-    // ==================================================================
 
     void MarkStatsDirty()
     {
         bStatsDirty = true;
     }
 
-    // DefaultValue matters: additive stats (MaxShieldPoints, EnergyCapacity)
+    // FGValue matters: additive stats (MaxShieldPoints, EnergyCapacity)
     // should default to 0 when absent, but multiplicative ones (resistances)
     // need to default to 1 or missing equipment would zero out all damage.
     float GetShipStat(FGameplayTag StatTag, float DefaultValue = 0.0)
@@ -235,13 +308,10 @@ class UShipStateComponent : UActorComponent
         bStatsDirty = false;
     }
 
-    // Full pass, O(equipped items + their stats). Only runs when
-    // bStatsDirty is set by an equip/unequip/modifier change - never on a
-    // per-tick or per-query basis. Each item's own RecalculateStats() is
-    // itself cheap here because of the per-stat bDirty check (Level 1).
     private void RecalculateShipStats()
     {
         CachedShipStats.Empty();
+        CachedWeaponMaxDamage.Empty();
 
         for (const auto& BaseStat : CharacterStats)
             CachedShipStats.Add(BaseStat.StatTag, BaseStat.BaseValue);
@@ -273,12 +343,46 @@ class UShipStateComponent : UActorComponent
         CachedShipStats.GetKeys(AggregatedTags);
         for (FGameplayTag Tag : AggregatedTags)
             CachedShipStats[Tag] = GameLogic::ApplyModifiers(CachedShipStats[Tag], Tag, GlobalModifiers);
+
+        RecalculateWeaponDamageCache(SlotTags);
     }
 
-    // ------------------------------------------------------------------
-    // Modifier management - installing upgrades / socketing micromodules
-    // should go through these so dirtiness cascades correctly.
-    // ------------------------------------------------------------------
+    // Per weapon: BaseMaxDamage * (1 + DamageGlobal Mult) * (1 + <DamageType> Mult) + DamageGlobal Flat + <DamageType> Flat.
+    // Can't reuse CachedShipStats for this - see the file header.
+    private void RecalculateWeaponDamageCache(const TArray<FGameplayTag>& SlotTags)
+    {
+            for (FGameplayTag SlotTag : SlotTags)
+        {
+            FGameItem Item = EquipmentSlots[SlotTag];
+            if (!Item.IsValid())
+                continue;
+
+            UItemWeapon Weapon = Cast<UItemWeapon>(Item.GetEquipmentFragment());
+            if (Weapon == nullptr)
+                continue;
+
+            float BaseMaxDamage = Weapon.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_Weapon_MaxDamage);
+            if (BaseMaxDamage <= 0.0)
+                BaseMaxDamage = Weapon.MinDamage; // Stats entry not set up yet - fall back to a flat roll
+
+            TArray<FGameplayTag> DamageBonusTags;
+            DamageBonusTags.Add(GameplayTags::SpaceShip_Stat_Positive_DamageGlobal);
+            FGameplayTag TypeTag = GetDamageTypeTag(Weapon.DamageType);
+            if (TypeTag.IsValid())
+                DamageBonusTags.Add(TypeTag);
+
+            CachedWeaponMaxDamage.Add(SlotTag, GameLogic::ApplyModifierGroup(BaseMaxDamage, DamageBonusTags, GlobalModifiers));
+        }
+    }
+
+    // Effective MaxDamage for the weapon in WeaponSlotTag, DamageGlobal and
+    // type-specific bonuses already folded in. What FireWeaponAt rolls against.
+    UFUNCTION(BlueprintPure)
+    float GetEffectiveWeaponMaxDamage(FGameplayTag WeaponSlotTag)
+    {
+        RecalculateShipStatsIfDirty();
+        return CachedWeaponMaxDamage.Contains(WeaponSlotTag) ? CachedWeaponMaxDamage[WeaponSlotTag] : 0.0;
+    }
 
     UFUNCTION()
     bool AddModifierToSlot(FGameplayTag SlotTag, FStatModifier Modifier)
@@ -310,27 +414,93 @@ class UShipStateComponent : UActorComponent
         return true;
     }
 
-    UFUNCTION()
-    void AddGlobalModifier(FStatModifier Modifier)
+    void AddGlobalModifierStat(FStatModifier Modifier)
     {
         GlobalModifiers.Add(Modifier);
         MarkStatsDirty();
     }
 
     UFUNCTION()
-    void RemoveGlobalModifiersFromSource(FGameplayTag SourceType)
+    void AddGlobalModifier(FGameplayTag SourceType, FGameplayTag StatTag, EStatType Type, float Value = 0.0)
     {
+        FStatModifier NewModifier;
+        NewModifier.SourceType = SourceType;
+        NewModifier.StatTag = StatTag;
+        NewModifier.Type = Type;
+        NewModifier.Value = Value;
+        GlobalModifiers.Add(NewModifier);
+        MarkStatsDirty();
+    }
+
+    UFUNCTION()
+    void RemoveGlobalModifiers(FStatModifier GlobalModifier, int AmountToRemove=1)
+    {
+        int Count = 0;
         for (int32 i = GlobalModifiers.Num() - 1; i >= 0; i--)
         {
-            if (GlobalModifiers[i].SourceType == SourceType)
+            if (GlobalModifiers[i] == GlobalModifier)
+            {
                 GlobalModifiers.RemoveAt(i);
+                Count++;
+                if (AmountToRemove == Count)
+                    break;
+            }
         }
         MarkStatsDirty();
     }
 
     private UItemHull GetHullFragment()
     {
-        return Cast<UItemHull>(Hull.GetEquipmentFragment());
+        // FIX: guard against reading a key that doesn't exist yet - true
+        // before the very first SwapItem() call installs a hull.
+        if (!EquipmentSlots.Contains(GameplayTags::SpaceShip_Equipment_Hull))
+            return nullptr;
+
+        return UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_Hull].Fragments, UItemHull);
+    }
+
+    private UItemFuelTank GetFuelTankFragment()
+    {
+        // FIX: guard against reading a key that doesn't exist yet - true
+        // before the very first SwapItem() call installs a hull.
+        if (!EquipmentSlots.Contains(GameplayTags::SpaceShip_Equipment_Hull))
+            return nullptr;
+
+        return UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_FuelTank].Fragments, UItemFuelTank);
+    }
+
+    private UItemWeapon GetWeaponFragment(FGameplayTag WeaponSlot)
+    {
+        // FIX: guard against reading a key that doesn't exist yet - true
+        // before the very first SwapItem() call installs a hull.
+        if (!EquipmentSlots.Contains(GameplayTags::SpaceShip_Equipment_Hull))
+            return nullptr;
+
+        return UGameUtility::GetItemFragment(EquipmentSlots[WeaponSlot].Fragments, UItemWeapon);
+    }
+
+    private void GrantSlotsFromHull()
+    {
+        UItemHull HullFragment = GetHullFragment();
+        if (HullFragment == nullptr)
+            return;
+
+        // Unequip items from slots that the new hull does NOT support
+        TArray<FGameplayTag> CurrentSlotTags;
+        EquipmentSlots.GetKeys(CurrentSlotTags);
+
+        for (FGameplayTag SlotTag : CurrentSlotTags)
+        {
+            if (SlotTag == GameplayTags::SpaceShip_Equipment_Hull)
+                continue;
+
+            if (!HullFragment.OpenSlots.HasTagExact(SlotTag))
+            {
+                UnequipItem(SlotTag); // Moves item to CargoHold and removes key from EquipmentSlots
+            }
+        }
+        // Open slots are queried directly from HullFragment.OpenSlots on demand,
+        // so no empty placeholder items are added to EquipmentSlots.
     }
 
     // ==================================================================
@@ -338,25 +508,26 @@ class UShipStateComponent : UActorComponent
     // ==================================================================
 
     // Sum of every equipped item's mass (via FGameItem::GetItemMass) plus
-    // everything in the cargo hold, except the hull(s), which use
+    // everything in the cargo hold, except the hull, which uses
     // UItemHull::GetHullMass() instead.
     UFUNCTION(BlueprintPure)
     float GetTotalShipMass()
     {
         float TotalMass = 0.0;
 
+        UItemHull HullFragment = GetHullFragment();
+        if (HullFragment != nullptr)
+            TotalMass += HullFragment.GetHullMass();
+
         TArray<FGameplayTag> SlotTags;
         EquipmentSlots.GetKeys(SlotTags);
-
-        UItemHull HullFragment = GetHullFragment();
-        TotalMass += HullFragment.GetHullMass();
+        SlotTags.Remove(GameplayTags::SpaceShip_Equipment_Hull);
 
         for (FGameplayTag SlotTag : SlotTags)
         {
             FGameItem Item = EquipmentSlots[SlotTag];
             if (!Item.IsValid())
                 continue;
-
 
             TotalMass += Item.GetItemMass();
         }
@@ -366,11 +537,37 @@ class UShipStateComponent : UActorComponent
 
         return TotalMass;
     }
+    
+    UFUNCTION(BlueprintPure)
+    float GetShipSpeed(float SlowdownMultiplier = 1.0)
+    {
+        UItemHull HullFragment = GetHullFragment();
+        if (HullFragment == nullptr)
+            return 0.0;
 
-    // ==================================================================
-    // Hull Points (mirrors the equipped hull's Current/MaxDurability -
-    // no separate float duplicated here)
-    // ==================================================================
+        // ShipMaxSpeed comes from the hull's own MaxSpeed Value, not
+        // GetShipStat() - it's item-local BaseValue + this item's own
+        // Upgrade/Micromodule Modifiers only. Ship-wide bonuses (Acrine,
+        // Artifacts, Stimulants) are handled separately below and must NOT
+        // be folded in here too, or they'd get counted twice.
+        float ShipMaxSpeed = HullFragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+
+        // Global/Acrine speed bonuses (Psi Matter Accelerator, Stimulant
+        // Gaalian Alacrity, an Acrine +50 Speed modifier, ...) live in
+        // GlobalModifiers, not on any item's Stats - kept separate from
+        // ShipMaxSpeed above so they're never double-counted.
+        GameLogic::FModifierComponents SpeedBonuses = GameLogic::GetModifierComponents(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, GlobalModifiers);
+
+        float CalculatedSpeed = GameLogic::GetShipSpeed(
+            ShipMaxSpeed,
+            CurrentMass,
+            SlowdownMultiplier,
+            GetCurrentSpeedMultiplier(), // FIX: was GetHullReliabilityPercent() (0-100) - GameLogic::GetShipSpeed wants the 0.3/0.75/1.0 multiplier
+            SpeedBonuses.MultiplicativeFactor,
+            SpeedBonuses.AdditiveSum);
+
+        return CalculatedSpeed;
+    }
 
     UFUNCTION(BlueprintPure)
     float GetCurrentHullPoints()
@@ -379,10 +576,11 @@ class UShipStateComponent : UActorComponent
         return HullFragment != nullptr ? HullFragment.CurrentDurability : 0.0;
     }
 
+    UFUNCTION(BlueprintPure)
     float GetMaxHullPoints()
     {
         UItemHull HullFragment = GetHullFragment();
-        return HullFragment != nullptr ? HullFragment.MaxDurability.Value : 0.0;
+        return HullFragment != nullptr ? HullFragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability) : 0.0;
     }
 
     private void ApplyHullDamage(float HullDamage)
@@ -391,13 +589,23 @@ class UShipStateComponent : UActorComponent
         if (HullFragment == nullptr)
             return; // no hull, nothing to damage against
 
-        HullFragment.CurrentDurability = Math::Max(0.0, HullFragment.CurrentDurability - HullDamage);
+        //Inputting a negative value (for example a self healing weapon) will not overflow capacity
+        HullFragment.CurrentDurability = Math::Min(HullFragment.CurrentDurability - HullDamage, HullFragment.GetMaximumDurability());
 
         if (HullFragment.CurrentDurability <= 0.0)
             OnHullDestroyed.Broadcast(this);
     }
 
-    // 0-100. Feeds GetReliabilitySpeedMultiplier from the damage-math file
+    private void ApplyShieldDamage(float ShieldDamage)
+    {
+        CurrentShieldPoints = Math::Max(0.0, CurrentShieldPoints - ShieldDamage);
+        TurnsSinceShieldDamage = 0; // resets the regen delay
+
+        if (CurrentShieldPoints <= 0.0)
+            OnShieldsDepleted.Broadcast(this);
+    }
+
+    // 0-100. Feeds GetReliabilitySpeedMultiplier from ShipCombatMath.as
     // (<10% -> critical penalty, <25% -> major penalty).
     float GetHullReliabilityPercent()
     {
@@ -412,28 +620,20 @@ class UShipStateComponent : UActorComponent
         return GameLogic::GetReliabilitySpeedMultiplier(GetHullReliabilityPercent());
     }
 
-    // ==================================================================
-    // Shield Points
-    // ==================================================================
-
     float GetMaxShieldPoints()
     {
         return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_MaxShieldPoints, 0.0);
     }
 
-    UFUNCTION(BlueprintCallable)
+    UFUNCTION()
     void SetShieldsActive(bool bActive)
     {
         bShieldsActive = bActive;
     }
 
-    // ==================================================================
-    // Heat
-    // ==================================================================
-
     float GetMaxHeat()
     {
-        return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_EnergyCapacity, 0.0);
+        return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatCapacity, 0.0);
     }
 
     void AddHeat(float Amount)
@@ -452,17 +652,14 @@ class UShipStateComponent : UActorComponent
         }
     }
 
-    // ==================================================================
-    // Turn processing
-    // ==================================================================
 
     // Call once per WEGO turn resolution, after orders have been applied.
-    UFUNCTION(BlueprintCallable)
+    UFUNCTION()
     void AdvanceTurn()
     {
         RecalculateShipStatsIfDirty();
 
-        float Dissipation = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_EnergyDissipation, 0.0);
+        float Dissipation = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatDissipation, 0.0);
         CurrentHeat = Math::Max(0.0, CurrentHeat - Dissipation);
         if (bIsOverheated && CurrentHeat < GetMaxHeat())
             bIsOverheated = false;
@@ -473,41 +670,34 @@ class UShipStateComponent : UActorComponent
         {
             CurrentShieldPoints = Math::Min(MaxShields, CurrentShieldPoints + MaxShields * ShieldRegenPercentPerTurn);
         }
+        CurrentMass = GetTotalShipMass();
     }
 
-    // ==================================================================
-    // Damage
-    // ==================================================================
-
-    UFUNCTION(BlueprintCallable)
-    void ApplyDamage(float UnmitigatedDamage, float ShieldBypass, FGameplayTag DamageType, float GlobalDamageModifier = 1.0)
+    UFUNCTION()
+    FDamageCalculationOutput ApplyDamage(float UnmitigatedDamage, float ShieldBypass, FGameplayTag DamageType, float GlobalDamageModifier = 1.0)
     {
         FDamageCalculationInput Input;
-        Input.UnmitigatedDamage = UnmitigatedDamage;
-        Input.ShieldBypass = ShieldBypass;
-        Input.CurrentShieldPoints = CurrentShieldPoints;
-        Input.bShieldsActive = bShieldsActive;
-        Input.ShieldDamageBlock = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShieldGeneratorDamageBlock, 0.0);
-        Input.ShipDamageResistance = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShipDamageResistance, 1.0);
-        Input.TypeSpecificResistance = GetResistanceForDamageType(DamageType);
-        Input.GlobalDamageModifier = GlobalDamageModifier;
-        Input.bIsInvulnerable = false;
+        Input.SourceUnmitigatedDamage = UnmitigatedDamage;
+        Input.SourceShieldBypass = ShieldBypass;
+        Input.TargetCurrentShields = CurrentShieldPoints;
+        Input.bTargetHasShieldsActive = bShieldsActive;
+        Input.TargetShieldDamageBlock = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShieldGeneratorDamageBlock, 0.0);
+        Input.TargetShipDamageResistance = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShipDamageResistance, 1.0);
+        Input.TargetTypeSpecificResistance = GetResistanceForDamageType(DamageType);
+        Input.SourceGlobalDamageModifier = GlobalDamageModifier;
+        Input.bTargetIsInvulnerable = false;
 
         FDamageCalculationOutput Output = GameLogic::CalculateDamage(Input);
 
         if (Output.ShieldDamage > 0.0)
-        {
-            CurrentShieldPoints = Math::Max(0.0, CurrentShieldPoints - Output.ShieldDamage);
-            TurnsSinceShieldDamage = 0; // resets the regen delay
-
-            if (CurrentShieldPoints <= 0.0)
-                OnShieldsDepleted.Broadcast(this);
-        }
+            ApplyShieldDamage(Output.ShieldDamage);
 
         if (Output.HullDamage > 0.0)
             ApplyHullDamage(Output.HullDamage);
 
         AddHeat(GameLogic::CalculateTargetEnergyBuildup(Output.HullDamage, Output.ShieldDamage, 1.0));
+
+        return Output;
     }
 
     private float GetResistanceForDamageType(FGameplayTag DamageType)
@@ -521,48 +711,64 @@ class UShipStateComponent : UActorComponent
 
         return 1.0; // DamageType_Chemical / DamageType_Generic - flat armor only
     }
-
-    // ==================================================================
-    // Weapon fire (ties RollWeaponDamage + ApplyDamage together)
-    // ==================================================================
-
-    UFUNCTION(BlueprintCallable)
-    void FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target)
+    
+    UFUNCTION()
+    int FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target)
     {
         if (Target == nullptr || !EquipmentSlots.Contains(WeaponSlotTag))
-            return;
+            return -1;
 
-        UItemWeapon Weapon = Cast<UItemWeapon>(EquipmentSlots[WeaponSlotTag].GetEquipmentFragment());
+        UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);//Cast<UItemWeapon>(EquipmentSlots[WeaponSlotTag].GetEquipmentFragment());
         if (Weapon == nullptr || !Weapon.IsOperational())
-            return;
+            return - 1;
 
         float Accuracy = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
         float Evasion = Target.GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Evasion, 0.0);
 
-        float MaxDamage = Weapon.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_Weapon_MaxDamage);
-        if (MaxDamage <= 0.0)
-            MaxDamage = Weapon.MinDamage; // Stats entry not set up yet - fall back to a flat roll
+        // Per-weapon: this specific weapon's own MaxDamage with DamageGlobal
+        // and its own DamageType's bonus already folded in - see
+        // RecalculateWeaponDamageCache() and the file header for why this
+        // can't be a plain GetShipStat() lookup.
+        float EffectiveMaxDamage = GetEffectiveWeaponMaxDamage(WeaponSlotTag);
 
-        float RolledDamage = GameLogic::RollWeaponDamage(Weapon.MinDamage, MaxDamage, Accuracy, Evasion);
+        float RolledDamage = GameLogic::RollWeaponDamage(Weapon.MinDamage, EffectiveMaxDamage, Accuracy, Evasion);
 
-        float GlobalDamageModifier = 1.0
-            + GetShipStat(GameplayTags::SpaceShip_Stat_Positive_DamageGlobal, 0.0)
-            + GetDamageTypeBonus(Weapon.DamageType);
+        // The only bonus still resolved as a true multiplier at damage-resolution
+        // time is the faction bonus - it depends on who we're shooting at, so
+        // unlike the flat bonuses above it can't be baked into MaxDamage ahead
+        // of time.
+        float GlobalDamageModifier = 1.0 + GetShipStat(GetFactionTargetTag(Target.Faction), 0.0);
 
-        Target.ApplyDamage(RolledDamage, Weapon.ShieldBypass, Weapon.DamageType, GlobalDamageModifier);
+        FDamageCalculationOutput Output = Target.ApplyDamage(RolledDamage, Weapon.ShieldBypass, Weapon.DamageType, GlobalDamageModifier);
 
         AddHeat(Weapon.HeatUse); // firing costs the shooter heat too
+
+        return Math::RoundToInt(Output.HullDamage);
     }
 
-    private float GetDamageTypeBonus(FGameplayTag DamageType)
+    private FGameplayTag GetFactionTargetTag(FGameplayTag TargetFaction)
     {
-        if (DamageType == GameplayTags::DamageType_Kinetic)
-            return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_DamageKinetic, 0.0);
-        if (DamageType == GameplayTags::DamageType_Energy)
-            return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_DamageEnergetic, 0.0);
-        if (DamageType == GameplayTags::DamageType_Explosive)
-            return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_DamageExplosive, 0.0);
-        return 0.0;
+        if (GameplayTags::Race_Coalition.MatchesTag(TargetFaction))
+        {
+            return GameplayTags::SpaceShip_Stat_Positive_DamageCoalition;
+        }
+        else if (GameplayTags::Race_Dominator.MatchesTag(TargetFaction))
+        {
+            return GameplayTags::SpaceShip_Stat_Positive_DamageDominator;
+        }
+        return FGameplayTag();
+    }
+
+    // RENAMED from GetDamageTypeBonus: returns the tag to look up rather than
+    // the resolved float, matching GetFactionTargetTag's shape - the bonus is
+    // now read via GetShipStat() at the FireWeaponAt call site instead of a
+    // second, separate resolution path.
+    private FGameplayTag GetDamageTypeTag(FGameplayTag DamageType)
+    {
+        if (DamageType == GameplayTags::DamageType_Kinetic) return GameplayTags::SpaceShip_Stat_Positive_DamageKinetic;
+        if (DamageType == GameplayTags::DamageType_Energy) return GameplayTags::SpaceShip_Stat_Positive_DamageEnergetic;
+        if (DamageType == GameplayTags::DamageType_Explosive) return GameplayTags::SpaceShip_Stat_Positive_DamageExplosive;
+        return FGameplayTag();
     }
 
     // ==================================================================
@@ -586,14 +792,23 @@ class UShipStateComponent : UActorComponent
     UFUNCTION()
     void RunSelfTest()
     {
-        if (TestHullDefinition == nullptr)
-        {
-            Print("RunSelfTest: assign TestHullDefinition first.");
-            return;
-        }
+        FGameItem Hull = InstantiateItem(TestHullDefinition);
+        UItemHull Fragment = UGameUtility::GetItemFragment(Hull.Fragments, UItemHull);
+        float Speed1 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+        float Dur1 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
 
-        EquipItem(GameplayTags::SpaceShip_Equipment_Hull, InstantiateItem(TestHullDefinition));
+        Fragment.AddModifier(GameplayTags::StatSource_Upgrade, GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative,0.31);
+        Fragment.AddModifier(GameplayTags::StatSource_Micromodule1, GameplayTags::SpaceShip_Stat_Positive_MaximumDurability, EStatType::Multiplicative, 0.2);
+        Fragment.RecalculateStats();
+        float Speed2 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+        Print(f"Speed:{Speed1}->{Speed2}");
+        float Dur2 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
+        Print(f"MaxDur:{Dur1}->{Dur2}\nCurrentDur:{Fragment.CurrentDurability}");
 
+        AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Positive_DamageKinetic, EStatType::Multiplicative, 2.4);
+        
+        SwapItem(GameplayTags::SpaceShip_Equipment_Hull, InstantiateItem(TestHullDefinition));
+    
         if (TestWeaponDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_1, InstantiateItem(TestWeaponDefinition));
 
@@ -603,32 +818,49 @@ class UShipStateComponent : UActorComponent
         if (TestFuelTankDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_FuelTank, InstantiateItem(TestFuelTankDefinition));
 
+        RecalculateShipStats();
         CurrentShieldPoints = GetMaxShieldPoints();
+        
+        CurrentMass = GetTotalShipMass();
+        float MaxHull = GetMaxHullPoints();
+        float HP = GetCurrentHullPoints();
+        float MaxShields = GetMaxShieldPoints();
+        float MaxHeat = GetMaxHeat();
 
-        float mass = GetTotalShipMass();
-        float maxhull = GetMaxHullPoints();
-        float maxshields = GetMaxShieldPoints();
-        float maxheat = GetMaxHeat();
-        Print(f"Total ship mass: {mass}");
-        Print(f"Max hull points: {maxhull}");
-        Print(f"Max shield points: {maxshields}");
-        Print(f"Max heat: {maxheat}");
+        Print(f"Mass: {CurrentMass}", 20);
+        Print(f"HP: {HP}/{MaxHull}", 20);
+        Print(f"SP: {CurrentShieldPoints}/{MaxShields}", 20);
+        Print("-------------\nOUR VALUES\n------------", 20);
 
         // Throwaway target so the full damage pipeline can be proven without
         // a second real ship placed in the level.
         UShipStateComponent DummyTarget = Cast<UShipStateComponent>(NewObject(this, UShipStateComponent));
-        DummyTarget.EquipItem(GameplayTags::SpaceShip_Equipment_Hull, InstantiateItem(TestHullDefinition));
+        DummyTarget.SwapItem(GameplayTags::SpaceShip_Equipment_Hull, InstantiateItem(TestHullDefinition));
         DummyTarget.CurrentShieldPoints = DummyTarget.GetMaxShieldPoints();
 
         if (TestWeaponDefinition != nullptr)
         {
-            FireWeaponAt(GameplayTags::SpaceShip_Equipment_Weapon_1, DummyTarget);
+            int Damage = FireWeaponAt(GameplayTags::SpaceShip_Equipment_Weapon_1, DummyTarget);
+            
+            float D_MaxHull = DummyTarget.GetMaxHullPoints();
+            float D_HP = DummyTarget.GetCurrentHullPoints();
+            float D_MaxShields = DummyTarget.GetMaxShieldPoints();
+            float D_MaxHeat = DummyTarget.GetMaxHeat();
 
-            float HP = DummyTarget.GetCurrentHullPoints();
-            Print("Target hull after hit: " + HP);
-            Print("Target shields after hit: " + DummyTarget.CurrentShieldPoints);
-            Print("Shooter heat after firing: " + CurrentHeat);
+            Print(f"HP: {D_HP}/{D_MaxHull}", 20);
+            Print(f"SP: {DummyTarget.CurrentShieldPoints}/{D_MaxShields}", 20);
+            Print(f"Heat: {DummyTarget.CurrentHeat}/{D_MaxHeat}", 20);
+            Print(f"Damaged target for: {Damage}", 20);
+            Print("-------------\nDUMMY VALUES\n------------", 20);
+            
+            Print(f"My Heat: {CurrentHeat}/{MaxHeat}", 20);
         }
+    }
+
+    UFUNCTION()
+    void Init()
+    {
+
     }
 
 }

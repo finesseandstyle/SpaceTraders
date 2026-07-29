@@ -583,10 +583,10 @@ DEFINE_FUNCTION(UGameUtility::execGetNRandomItems)
     }
 }
 
-const UItemFragment* UGameUtility::GetItemFragment(TArray<UItemFragment*>& Fragments,
+UItemFragment* UGameUtility::GetItemFragment(const TArray<UItemFragment*>& Fragments,
 	const TSubclassOf<UItemFragment>& FragmentType)
 {
-	for (const auto Fragment : Fragments)
+	for (auto Fragment : Fragments)
 	{
 		if (Fragment && Fragment->IsA(FragmentType))
 		{
@@ -597,11 +597,11 @@ const UItemFragment* UGameUtility::GetItemFragment(TArray<UItemFragment*>& Fragm
 	return nullptr;
 }
 
-TArray<UItemFragment*> UGameUtility::GetItemFragments(TArray<UItemFragment*>& Fragments,
+TArray<UItemFragment*> UGameUtility::GetItemFragments(const TArray<UItemFragment*>& Fragments,
                                                       const TSubclassOf<UItemFragment>& FragmentType)
 {
 	TArray<UItemFragment*> NewFragments;
-	for (const auto Fragment : Fragments)
+	for (auto Fragment : Fragments)
 	{
 		if (Fragment && Fragment->IsA(FragmentType))
 		{

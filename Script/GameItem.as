@@ -74,7 +74,8 @@ struct FGameItem {
     UPROPERTY() FGameplayTag Origin; //which race / faction produced it
     UPROPERTY() FGameplayTag Manufacturer; //optional
     UPROPERTY() TArray<UItemFragment> Fragments;
-    
+
+    // --- NEW ---------------------------------------------------------------
     bool IsValid() const
     {
         return ItemDefinition != nullptr;
@@ -110,12 +111,12 @@ class UItemEquipment : UItemFragment
 {
     //Random number, used as a seed for upgrading or comparing IDs 
     UPROPERTY() int MagicNumber = Math::Rand();
-    UPROPERTY() FStatAttribute MaxDurability; //Unlike in SRHD, max durability is always base 100 for non-hull items.
-    UPROPERTY() float CurrentDurability = MaxDurability.Value;
+    UPROPERTY() float CurrentDurability = 100.0;
     //reliability doesn't need an attribute as its maximum value is only determined by Origin/Manufacturer
     UPROPERTY() float Reliability = 100.0; //affects how fast items's durability gets degraded (non-hull)
     UPROPERTY() TArray<FStatAttribute> Stats;
-    UPROPERTY() TArray<FStatModifier> Modifiers; //can modify other stats from other equipment types
+    UPROPERTY() TArray<FStatModifier> Modifiers; //only modify our own native stats
+    UPROPERTY() TArray<FStatModifier> GlobalModifiers; //can modify other stats from other equipment types
     UPROPERTY() uint8 TechLevel = 1; //1 to 8
 
     bool IsOperational() const { return CurrentDurability > 0.0; }
@@ -137,18 +138,21 @@ class UItemEquipment : UItemFragment
 
             Stat.Value = GameLogic::ApplyModifiers(Stat.BaseValue, Stat.StatTag, Modifiers);
             Stat.bDirty = false;
-        }
 
-        if (MaxDurability.bDirty)
-        {
-            MaxDurability.Value = GameLogic::ApplyModifiers(MaxDurability.BaseValue, MaxDurability.StatTag, Modifiers);
-            MaxDurability.bDirty = false;
+            if (Stat.StatTag == GameplayTags::SpaceShip_Stat_Positive_MaximumDurability)
+            {
+                CurrentDurability = Math::Min(CurrentDurability, Stat.Value);
+            }
         }
     }
 
-    float GetStatValue(FGameplayTag StatTag)
+    float GetMaximumDurability() const
     {
-        RecalculateStats();
+        return GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
+    }
+
+    float GetStatValue(FGameplayTag StatTag) const
+    {
         for (const auto& Stat : Stats)
         {
             if (Stat.StatTag == StatTag)
@@ -164,8 +168,6 @@ class UItemEquipment : UItemFragment
             if (Stat.StatTag == StatTag)
                 Stat.bDirty = true;
         }
-        if (MaxDurability.StatTag == StatTag)
-            MaxDurability.bDirty = true;
     }
 
     // Force a full recompute - mainly for right after instantiation, since a
@@ -175,11 +177,21 @@ class UItemEquipment : UItemFragment
     {
         for (auto& Stat : Stats)
             Stat.bDirty = true;
-        MaxDurability.bDirty = true;
     }
 
     void AddModifier(FStatModifier NewModifier)
     {
+        Modifiers.Add(NewModifier);
+        MarkStatDirty(NewModifier.StatTag); // only the stat(s) this modifier targets need recompute
+    }
+
+    void AddModifier(FGameplayTag SourceType, FGameplayTag StatTag, EStatType Type, float Value = 0.0)
+    {
+        FStatModifier NewModifier;
+        NewModifier.SourceType = SourceType;
+        NewModifier.StatTag = StatTag;
+        NewModifier.Type = Type;
+        NewModifier.Value = Value;
         Modifiers.Add(NewModifier);
         MarkStatDirty(NewModifier.StatTag); // only the stat(s) this modifier targets need recompute
     }
@@ -199,6 +211,11 @@ class UItemEquipment : UItemFragment
 
     void RemoveUpgrades() {
         RemoveModifiersFromSource(GameplayTags::StatSource_Upgrade); // NEW: reuses the generalized version above
+    }
+
+    void RemoveMicromodules() {
+        RemoveModifiersFromSource(GameplayTags::StatSource_Micromodule1);
+        RemoveModifiersFromSource(GameplayTags::StatSource_Micromodule2);
     }
 }
 
@@ -234,7 +251,6 @@ class UItemWeapon : UItemEquipment
 
     //All of these 5 values can be instead read from a Data Table or Asset, aren't expected to be modifiable anyway.
     UPROPERTY() float MinDamage = 10; //Always related to the item's tech leve
-    UPROPERTY() float Initiative = 10; //1-30, higher values fire first in the turn execution. 
     UPROPERTY() float HeatUse = 5.0;
 	UPROPERTY() float MiningEfficiency  = 0.5;
 	UPROPERTY() float ShieldBypass = 0.0;
@@ -247,19 +263,17 @@ class UItemHull : UItemEquipment
 {
 	UPROPERTY() FGameplayTagContainer OpenSlots; //Spaceship_Equipment tags
 
-	UPROPERTY() float CargoCapacity    = 150.0;
-	UPROPERTY() float EquipmentCapacity= 400.0;
-	UPROPERTY() float MaxSpeed         = 500.0;
-	UPROPERTY() float EnergyEfficiency = 0.85;
-
-	UPROPERTY() float ShipDamageResistance     = 1.0;
-	UPROPERTY() float ShipKineticResistance    = 1.0;
-	UPROPERTY() float ShipEnergeticResistance  = 1.0;
-	UPROPERTY() float ShipExplosiveResistance  = 1.0;
-	
-	float GetHullSize() const { return CargoCapacity + EquipmentCapacity; }
+	float GetHullSize() { 
+        return GetStatValue(GameplayTags::SpaceShip_Stat_Positive_CargoCapacity) + 
+               GetStatValue(GameplayTags::SpaceShip_Stat_Positive_EquipmentCapacity); 
+    }
     float GetHullMass() { return Math::RoundToFloat(GetHullSize() * (0.6 + 0.03 * (TechLevel - 1))); }
 };
+
+class UItemFuelTank : UItemEquipment
+{
+    UPROPERTY() float CurrentFuel = 20;
+}
 
 
 class UOnHitEffect : UObject //not sure if it should extend uobject
@@ -269,13 +283,20 @@ class UOnHitEffect : UObject //not sure if it should extend uobject
 }
 
 //Modifiable stats like MaxHealth, MaxShieldPoints, MaxDamage, WeaponRange, RadarRange, ShipSpeed
+
 struct FStatAttribute
 {
-    FGameplayTag StatTag;
-    float BaseValue = 100.0;
-    float Value = 100.0; //result of calculating the stats through all of its modifiers on board
-    bool bDirty=false;
-}
+    UPROPERTY() FGameplayTag StatTag;
+    UPROPERTY() float BaseValue = 100.0;
+    UPROPERTY() float Value = 100.0; //Base Value + Any Upgrades + Any Micromodule Effects
+    UPROPERTY() bool bDirty=false; //we only flag as dirty when we modify the stat, for example upgrade it, add a micromodule, etc
+};
+
+struct FRangedStatAttribute
+{
+    FStatAttribute MaxValueStat;
+    float CurrentValue = 100.0;
+};
 
 enum EStatType
 {
@@ -286,8 +307,13 @@ enum EStatType
 
 struct FStatModifier
 {
-    FGameplayTag SourceType; //Upgrade, Micromodule1/2, Acrine, Artifact, Active Effects like Stimulants, etc.
-    FGameplayTag StatTag; //Engine Speed, Radar Range, Weapon Max Damage, the actual stat type
-    EStatType Type;
-    float Value = 0.0;
+    UPROPERTY() FGameplayTag SourceType; //Upgrade, Micromodule1/2, Acrine, Artifact, Active Effects like Stimulants, etc.
+    UPROPERTY() FGameplayTag StatTag; //Engine Speed, Radar Range, Weapon Max Damage, the actual stat type
+    UPROPERTY() EStatType Type;
+    UPROPERTY() float Value = 0.0;
+
+    bool opEquals(const FStatModifier& Other) const
+    {
+        return SourceType == Other.SourceType && StatTag == Other.StatTag && Type == Other.Type && Value==Other.Value;
+    }
 }

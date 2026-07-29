@@ -152,9 +152,9 @@ public:
 	
 	//Returns the first fragment of selected type
 	UFUNCTION(BlueprintCallable, meta = (DeterminesOutputType = "FragmentType"))
-	static const UItemFragment* GetItemFragment(TArray<UItemFragment*>& Fragments, const TSubclassOf<UItemFragment>& FragmentType);
+	static UItemFragment* GetItemFragment(const TArray<UItemFragment*>& Fragments, const TSubclassOf<UItemFragment>& FragmentType);
 	//Returns every fragment of selected type
 	UFUNCTION(BlueprintCallable, meta = (DeterminesOutputType = "FragmentType"))
-	TArray<UItemFragment*> GetItemFragments(TArray<UItemFragment*>& Fragments,
+	TArray<UItemFragment*> GetItemFragments(const TArray<UItemFragment*>& Fragments,
 	                                        const TSubclassOf<UItemFragment>& FragmentType);
 };
