@@ -75,6 +75,17 @@ struct FGameItem {
     UPROPERTY() FGameplayTag Manufacturer; //optional
     UPROPERTY() TArray<UItemFragment> Fragments;
 
+    FGameItem(UItemDefinition InDefinition, int InMass, int InValue, FGameplayTag InOrigin, 
+        FGameplayTag InManufacturer = FGameplayTag(), const TArray<UItemFragment>& InFragments = TArray<UItemFragment>())
+    {
+        ItemDefinition = InDefinition;
+        Mass = InMass;
+        Value = InValue;
+        Origin = InOrigin;
+        Manufacturer = InManufacturer;
+        Fragments = InFragments;
+    }
+
     // --- NEW ---------------------------------------------------------------
     bool IsValid() const
     {
@@ -289,7 +300,15 @@ struct FStatAttribute
     UPROPERTY() FGameplayTag StatTag;
     UPROPERTY() float BaseValue = 100.0;
     UPROPERTY() float Value = 100.0; //Base Value + Any Upgrades + Any Micromodule Effects
-    UPROPERTY() bool bDirty=false; //we only flag as dirty when we modify the stat, for example upgrade it, add a micromodule, etc
+    UPROPERTY() bool bDirty = false; //we only flag as dirty when we modify the stat, for example upgrade it, add a micromodule, etc
+
+    FStatAttribute(FGameplayTag InStatTag, const float InBaseValue)
+    {
+        StatTag = InStatTag;
+        BaseValue = InBaseValue;
+        Value = InBaseValue;
+        bDirty = false;
+    }
 };
 
 struct FRangedStatAttribute
@@ -307,7 +326,7 @@ enum EStatType
 
 struct FStatModifier
 {
-    //Purely for bookkeping
+    //Purely for book
     UPROPERTY() FGameplayTag SourceType; //Upgrade, Micromodule1/2, Acrine, Artifact, Active Effects like Stimulants, etc.
     UPROPERTY() FGameplayTag StatTag; //Engine Speed, Radar Range, Weapon Max Damage, the actual stat type
     UPROPERTY() EStatType Type;
@@ -316,5 +335,13 @@ struct FStatModifier
     bool opEquals(const FStatModifier& Other) const
     {
         return SourceType == Other.SourceType && StatTag == Other.StatTag && Type == Other.Type && Value==Other.Value;
+    }
+
+    FStatModifier(FGameplayTag InSource, FGameplayTag InTag, EStatType InType, const float InValue)
+    {
+        SourceType = InSource;
+        StatTag = InTag;
+        Type = InType;
+        Value = InValue;
     }
 }

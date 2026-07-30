@@ -846,7 +846,8 @@ class UTurnBasedMovementComponent : UActorComponent
                 if (IsTooCloseToSplineEnd(Stop, SplineLength))
                     continue;
 
-                UGameUtility::SortActorsOnDistance(Stop.PendingItems, Stop.StopLocation);
+                //Might not even be needed
+                //UGameUtility::SortActorsOnDistance(Stop.PendingItems, Stop.StopLocation);
                 CurrentTurnState.RemainingPlan.Add(Stop);
             }
         }

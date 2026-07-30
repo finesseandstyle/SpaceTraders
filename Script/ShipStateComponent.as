@@ -94,7 +94,6 @@ class UShipStateComponent : UActorComponent
     // Hull Points are NOT duplicated here - they live on the equipped hull's
     // CurrentDurability/MaxDurability. See GetCurrentHullPoints/GetMaxHullPoints.
 
-    UPROPERTY() float CurrentMass = 0.0;
     UPROPERTY() float CurrentShieldPoints = 0.0;
     UPROPERTY() bool bShieldsActive = true; // toggled once per turn by the player, like a stance
     UPROPERTY() int32 TurnsSinceShieldDamage = 0;
@@ -202,7 +201,7 @@ class UShipStateComponent : UActorComponent
             auto EquipmentFrag = Removed.GetEquipmentFragment();
             for (FStatModifier Modifier : EquipmentFrag.GlobalModifiers)
             {
-                RemoveGlobalModifiers(Modifier);
+                RemoveGlobalModifier(Modifier);
             }
 
             bChangedLoadout = true;
@@ -252,7 +251,7 @@ class UShipStateComponent : UActorComponent
         {
             for (FStatModifier Modifier : PrevEquipmentFrag.GlobalModifiers)
             {
-                RemoveGlobalModifiers(Modifier);
+                RemoveGlobalModifier(Modifier);
             }
         }
 
@@ -353,9 +352,11 @@ class UShipStateComponent : UActorComponent
     // FGValue matters: additive stats (MaxShieldPoints, EnergyCapacity)
     // should default to 0 when absent, but multiplicative ones (resistances)
     // need to default to 1 or missing equipment would zero out all damage.
+    UFUNCTION()
     float GetShipStat(FGameplayTag StatTag, float DefaultValue = 0.0)
     {
-        RecalculateShipStatsIfDirty();
+        //Caused infinite recursion when getting stats before clearing the dirty flag, stats are recalculated every turn anyway
+        //RecalculateShipStatsIfDirty();
         return CachedShipStats.Contains(StatTag) ? CachedShipStats[StatTag] : DefaultValue;
     }
 
@@ -403,12 +404,16 @@ class UShipStateComponent : UActorComponent
                 CachedShipStats.Add(Stat.StatTag, Existing + Stat.Value);
             }
         }
+        float Mass = CalculateTotalShipMass();
+        CachedShipStats.Add(GameplayTags::SpaceShip_Stat_Negative_ShipMass, Mass);
 
         // Ship-wide effects (Acrine, active effects/stimulants) fold on top last.
         TArray<FGameplayTag> AggregatedTags;
         CachedShipStats.GetKeys(AggregatedTags);
         for (FGameplayTag Tag : AggregatedTags)
             CachedShipStats[Tag] = GameLogic::ApplyModifiers(CachedShipStats[Tag], Tag, GlobalModifiers);
+
+        CachedShipStats.Add(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, GetShipSpeed());
 
         RecalculateWeaponDamageCache(SlotTags);
     }
@@ -502,7 +507,7 @@ class UShipStateComponent : UActorComponent
     }
 
     UFUNCTION()
-    void RemoveGlobalModifiers(FStatModifier GlobalModifier, int AmountToRemove=1)
+    void RemoveGlobalModifier(FStatModifier GlobalModifier, int AmountToRemove=1)
     {
         int Count = 0;
         for (int32 i = GlobalModifiers.Num() - 1; i >= 0; i--)
@@ -530,31 +535,16 @@ class UShipStateComponent : UActorComponent
 
     private UItemHull GetHullFragment()
     {
-        // FIX: guard against reading a key that doesn't exist yet - true
-        // before the very first SwapItem() call installs a hull.
-        if (!EquipmentSlots.Contains(GameplayTags::SpaceShip_Equipment_Hull))
-            return nullptr;
-
         return UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_Hull].Fragments, UItemHull);
     }
 
     private UItemFuelTank GetFuelTankFragment()
     {
-        // FIX: guard against reading a key that doesn't exist yet - true
-        // before the very first SwapItem() call installs a hull.
-        if (!EquipmentSlots.Contains(GameplayTags::SpaceShip_Equipment_Hull))
-            return nullptr;
-
         return UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_FuelTank].Fragments, UItemFuelTank);
     }
 
     private UItemWeapon GetWeaponFragment(FGameplayTag WeaponSlot)
     {
-        // FIX: guard against reading a key that doesn't exist yet - true
-        // before the very first SwapItem() call installs a hull.
-        if (!EquipmentSlots.Contains(GameplayTags::SpaceShip_Equipment_Hull))
-            return nullptr;
-
         return UGameUtility::GetItemFragment(EquipmentSlots[WeaponSlot].Fragments, UItemWeapon);
     }
 
@@ -579,8 +569,7 @@ class UShipStateComponent : UActorComponent
                 UnequipItem(SlotTag, Whatever); // Moves item to CargoHold and removes key from EquipmentSlots
             }
         }
-        // Open slots are queried directly from HullFragment.OpenSlots on demand,
-        // so no empty placeholder items are added to EquipmentSlots.
+
     }
 
     // ==================================================================
@@ -591,7 +580,7 @@ class UShipStateComponent : UActorComponent
     // everything in the cargo hold, except the hull, which uses
     // UItemHull::GetHullMass() instead.
     UFUNCTION(BlueprintPure)
-    float GetTotalShipMass()
+    float CalculateTotalShipMass()
     {
         float TotalMass = 0.0;
 
@@ -609,17 +598,15 @@ class UShipStateComponent : UActorComponent
             if (!Item.IsValid())
                 continue;
 
-            TotalMass += Item.GetItemMass();
+            TotalMass += Item.Mass;
         }
 
         for (const auto& CargoItem : Inventory)
-            TotalMass += CargoItem.GetItemMass();
+            TotalMass += CargoItem.Mass;
 
-        TotalMass = GameLogic::ApplyModifiers(TotalMass, GameplayTags::SpaceShip_Stat_Negative_ShipMass, GlobalModifiers);
-
-        return TotalMass;
+        return Math::RoundToFloat(TotalMass);
     }
-    
+
     UFUNCTION(BlueprintPure)
     float GetShipSpeed(float SlowdownMultiplier = 1.0)
     {
@@ -642,13 +629,13 @@ class UShipStateComponent : UActorComponent
 
         float CalculatedSpeed = GameLogic::GetShipSpeed(
             ShipMaxSpeed,
-            CurrentMass,
+            GetShipStat(GameplayTags::SpaceShip_Stat_Negative_ShipMass),
             SlowdownMultiplier,
-            GetCurrentSpeedMultiplier(), // FIX: was GetHullReliabilityPercent() (0-100) - GameLogic::GetShipSpeed wants the 0.3/0.75/1.0 multiplier
+            GetCurrentSpeedMultiplier(),
             SpeedBonuses.MultiplicativeFactor,
             SpeedBonuses.AdditiveSum);
 
-        return CalculatedSpeed;
+        return Math::RoundToFloat(CalculatedSpeed);
     }
 
     UFUNCTION(BlueprintPure)
@@ -734,6 +721,22 @@ class UShipStateComponent : UActorComponent
         }
     }
 
+    void SetAfterburners(bool Active=false)
+    {
+        FStatModifier Afterburner = FStatModifier(GameplayTags::StatSource_ActiveEffect,
+            GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative, 1.0);
+        //1.0 -> +100% -> 2x increase
+
+        if(Active)
+        {
+            AddGlobalModifierStat(Afterburner);
+        }
+        else
+        {
+            RemoveGlobalModifier(Afterburner);
+        }
+    }
+
 
     // Call once per WEGO turn resolution, after orders have been applied.
     UFUNCTION()
@@ -755,7 +758,7 @@ class UShipStateComponent : UActorComponent
 
         if (bChangedLoadout)
         {
-            CurrentMass = GetTotalShipMass();
+            
             bChangedLoadout = false;
         }
     }
@@ -888,7 +891,7 @@ class UShipStateComponent : UActorComponent
         float Speed1 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
         float Dur1 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
 
-        Fragment.AddModifier(GameplayTags::StatSource_Upgrade, GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative,0.31);
+        //Fragment.AddModifier(GameplayTags::StatSource_Upgrade, GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative,0.31);
         Fragment.AddModifier(GameplayTags::StatSource_Micromodule1, GameplayTags::SpaceShip_Stat_Positive_MaximumDurability, EStatType::Multiplicative, 0.2);
         Fragment.RecalculateStats();
         float Speed2 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
@@ -896,7 +899,7 @@ class UShipStateComponent : UActorComponent
         float Dur2 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
         Print(f"MaxDur:{Dur1}->{Dur2}\nCurrentDur:{Fragment.CurrentDurability}");
 
-        AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Positive_DamageKinetic, EStatType::Additive, 10);
+        //AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Positive_DamageKinetic, EStatType::Additive, 10);
         
         SwapItem(GameplayTags::SpaceShip_Equipment_Hull, InstantiateItem(TestHullDefinition));
     
@@ -913,14 +916,12 @@ class UShipStateComponent : UActorComponent
             EquipItem(GameplayTags::SpaceShip_Equipment_TractorBeam, InstantiateItem(TestTractorBeamDefinition));
 
 
-        FStatAttribute Accuracy = FStatAttribute();
-        Accuracy.BaseValue = 0;
-        Accuracy.Value= 0;
-        Accuracy.StatTag = GameplayTags::SpaceShip_Stat_Positive_Accuracy;
+        FStatAttribute Accuracy = FStatAttribute(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
         CharacterStats.Add(Accuracy);
 
-        AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Negative_ShipMass, EStatType::Additive, 100);
-    
+        AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Negative_ShipMass, EStatType::Multiplicative, 3.0);
+        SetAfterburners(true);
+        bChangedLoadout = true;
         RecalculateShipStats();
 
         //RemoveAllGlobalModifiersByStat(GameplayTags::SpaceShip_Stat_Negative_ShipMass);
@@ -930,25 +931,31 @@ class UShipStateComponent : UActorComponent
         FTractorBeamProperties TB = GetTractorBeamProps();
         Print(TB.ToString());
 
+        /*
         TArray<FGameplayTag> Stats;
         CachedShipStats.GetKeys(Stats);
         for (FGameplayTag Stat : Stats)
         {
-            Print(f"Stat:{Stat}={CachedShipStats[Stat]}");
+            Print(f"Stat:{Stat}={CachedShipStats[Stat]}", 20);
+        }*/
+        for (FStatModifier Stat : GlobalModifiers)
+        {
+            Print(f"Stat:{Stat.StatTag}={Stat.Value}", 20);
         }
 
 
-
         
-        CurrentMass = GetTotalShipMass();
+        float CurrentMass = GetShipStat(GameplayTags::SpaceShip_Stat_Negative_ShipMass);
         float MaxHull = GetMaxHullPoints();
         float HP = GetCurrentHullPoints();
         float MaxShields = GetMaxShieldPoints();
         float MaxHeat = GetMaxHeat();
+        float Speed = GetShipSpeed();
 
         Print(f"Mass: {CurrentMass}", 20);
         Print(f"HP: {HP}/{MaxHull}", 20);
         Print(f"SP: {CurrentShieldPoints}/{MaxShields}", 20);
+        Print(f"Speed: {Speed}", 20);
         Print("-------------\nOUR VALUES\n------------", 20);
 
         // Throwaway target so the full damage pipeline can be proven without
@@ -958,8 +965,8 @@ class UShipStateComponent : UActorComponent
         DummyTarget.CurrentShieldPoints = DummyTarget.GetMaxShieldPoints();
 
         FStatAttribute Evasion = FStatAttribute();
-        Evasion.BaseValue = 6;
-        Evasion.Value= 6;
+        Evasion.BaseValue = 0;
+        Evasion.Value= 0;
         Evasion.StatTag = GameplayTags::SpaceShip_Stat_Positive_Evasion;
         DummyTarget.CharacterStats.Add(Evasion);
         DummyTarget.RecalculateShipStats();
