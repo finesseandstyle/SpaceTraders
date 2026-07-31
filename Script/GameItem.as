@@ -162,14 +162,14 @@ class UItemEquipment : UItemFragment
         return GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
     }
 
-    float GetStatValue(FGameplayTag StatTag) const
+    float GetStatValue(FGameplayTag StatTag, const float DefaultValue=0.0) const
     {
         for (const auto& Stat : Stats)
         {
             if (Stat.StatTag == StatTag)
                 return Stat.Value;
         }
-        return 0.0;
+        return DefaultValue;
     }
 
     void MarkStatDirty(FGameplayTag StatTag)
@@ -188,6 +188,22 @@ class UItemEquipment : UItemFragment
     {
         for (auto& Stat : Stats)
             Stat.bDirty = true;
+    }
+
+    void RemoveModifier(FStatModifier Modifier, int AmountToRemove = 1)
+    {
+        int Count = 0;
+        for (int32 i = Modifiers.Num() - 1; i >= 0; i--)
+        {
+            if (Modifiers[i] == Modifier)
+            {
+                Modifiers.RemoveAt(i);
+                Count++;
+                if (AmountToRemove == Count)
+                    break;
+            }
+        }
+        MarkStatDirty(Modifier.StatTag);
     }
 
     void AddModifier(FStatModifier NewModifier)
@@ -218,6 +234,22 @@ class UItemEquipment : UItemFragment
                 Modifiers.RemoveAt(i);
             }
         }
+    }
+
+    void RemoveDurability(float Amount)
+    {
+        float MaxDur = GetMaximumDurability();
+        //if we remove durability
+        float NewAmount = Amount * GameLogic::ApplyModifiers(Amount, GameplayTags::SpaceShip_Stat_Negative_DurabilityDegradation, Modifiers);
+        float Degradation = GameLogic::GetEquipmentDegradationMultiplier(CurrentDurability, MaxDur) * NewAmount;
+        CurrentDurability = Math::Clamp(CurrentDurability - Degradation, 0.0, MaxDur);
+    }
+
+    void AddDurability(float Amount)
+    {
+        float MaxDur = GetMaximumDurability();
+        float Repair = GameLogic::GetEquipmentDegradationMultiplier(CurrentDurability, MaxDur) * Amount;
+        CurrentDurability = Math::Clamp(CurrentDurability + Repair, 0.0, MaxDur);
     }
 
     void RemoveUpgrades() {

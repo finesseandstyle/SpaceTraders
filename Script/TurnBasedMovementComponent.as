@@ -84,6 +84,15 @@ struct FItemWindow
 
         return 0;
     }
+
+    FItemWindow(AActor InItem, float InEntry, float InExit, float InOptDist, float InActualList)
+    {
+        Item = InItem;
+        Entry = InEntry;
+        Exit = InExit;
+        OptDist = InOptDist;
+        ActualDist = InActualList;
+    }
 };
 
 class UTurnBasedMovementComponent : UActorComponent
@@ -614,9 +623,10 @@ class UTurnBasedMovementComponent : UActorComponent
         if (!(DestinationLocation.Distance(CurrentLocation) * 0.5f > FPathProperties().DubinsTurnRadius + CurrentSpeed / 50.f))
             return false;
 
-        bool bAdjustedPath = UPathingUtils::AddPointsToPath(PathSpline, CurrentLocation, ForwardVector, Destination, 400, EndDistance, ZLevel, CurrentSpeed, FPathProperties());
+        //bool bAdjustedPath = 
+        UPathingUtils::AddPointsToPath(PathSpline, CurrentLocation, ForwardVector, Destination, 400, EndDistance, ZLevel, CurrentSpeed, FPathProperties());
 
-        if (bAdjustedPath) return false;
+        //if (bAdjustedPath) return false;
         const float PathLength = PathSpline.GetSplineLength();
 
         CheckpointDistances.Empty();
@@ -724,6 +734,13 @@ class UTurnBasedMovementComponent : UActorComponent
             if (ActualDist > TractorBeamRadius)
                 continue;
 
+            //Behind ship item check, so that we don't attempt to needlessly go forwards
+            if (OptDist <= 1.0)
+            {
+                Windows.Add(FItemWindow(Item, 0, 0, 0, ActualDist));
+                continue;
+            }
+
             float HalfWindow = Math::Sqrt(Math::Square(TractorBeamRadius) - Math::Square(ActualDist));
             float Entry = OptDist - HalfWindow;
             float Exit  = OptDist + HalfWindow;
@@ -731,13 +748,7 @@ class UTurnBasedMovementComponent : UActorComponent
             if (Exit < StartDistance || Entry > EndDistance)
                 continue;
 
-            FItemWindow Win;
-            Win.Item = Item;
-            Win.Entry = Entry;
-            Win.Exit = Exit;
-            Win.OptDist = OptDist;
-            Win.ActualDist = ActualDist;
-            Windows.Add(Win);
+            Windows.Add(FItemWindow(Item, Entry, Exit, OptDist, ActualDist));
         }
 
         return Windows;

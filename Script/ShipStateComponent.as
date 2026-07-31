@@ -726,14 +726,20 @@ class UShipStateComponent : UActorComponent
         FStatModifier Afterburner = FStatModifier(GameplayTags::StatSource_ActiveEffect,
             GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative, 1.0);
         //1.0 -> +100% -> 2x increase
+        FStatModifier Degradation = FStatModifier(GameplayTags::StatSource_ActiveEffect, 
+            GameplayTags::SpaceShip_Stat_Negative_DurabilityDegradation, EStatType::Multiplicative, 50.0);
+
+        UItemHull Hull = GetHullFragment();
 
         if(Active)
         {
             AddGlobalModifierStat(Afterburner);
+            Hull.AddModifier(Degradation);
         }
         else
         {
             RemoveGlobalModifier(Afterburner);
+            Hull.RemoveModifier(Degradation);
         }
     }
 
@@ -769,12 +775,12 @@ class UShipStateComponent : UActorComponent
         FDamageCalculationInput Input;
         Input.SourceUnmitigatedDamage = UnmitigatedDamage;
         Input.SourceShieldBypass = ShieldBypass;
+        Input.SourceGlobalDamageModifier = GlobalDamageModifier;
         Input.TargetCurrentShields = CurrentShieldPoints;
         Input.bTargetHasShieldsActive = bShieldsActive;
         Input.TargetShieldDamageBlock = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShieldGeneratorDamageBlock, 0.0);
         Input.TargetShipDamageResistance = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShipDamageResistance, 1.0);
         Input.TargetTypeSpecificResistance = GetResistanceForDamageType(DamageType);
-        Input.SourceGlobalDamageModifier = GlobalDamageModifier;
         Input.bTargetIsInvulnerable = false;
 
         FDamageCalculationOutput Output = GameLogic::CalculateDamage(Input);

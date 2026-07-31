@@ -35,28 +35,40 @@ namespace GameLogic
     const float GHullReliabilitySpeedMult_Major = 0.75;
     const float GHullReliabilitySpeedMult_Critical = 0.3;
 
-    const float MinMass = 750;
-    const float MaxMass = 2500;
+    const float PassiveEquipmentDegradation = 0.1;
+    const float ReliabilityThreshold = 0.5; //Items with >50% degrade the slowest
+
+    const float MaxSpeedMass = 750;
+    const float MinSpeedMass = 2500;
 
     //Pickups
     const float SnapCollectRadius = 20.0; //When an item's distance is < this, instantly pick up
     const float ContestHysteresis = 1.5;  //How much bigger an opposing actor's score need to be to claim an item.
-    const float ClusterSplitGap = 150.0;  // If the empty space between two items is larger than this, split the stop.
+    const float ClusterSplitGap = 140.0;  // If the empty space between two items is larger than this, split the stop.
 
+    const float GetEquipmentDegradationMultiplier(float CurrentDurability, float MaxDurability)
+    {
+        float Ratio = Math::Clamp(CurrentDurability / MaxDurability, 0.0, 1.0);
+        float DegradedProgress = Math::Clamp((0.5 - Ratio) / 0.5, 0.0, 1.0); 
+
+        //100% to 50% Reliability -> 1x passive degradation
+        //40% Rel -> 2.8x passive degradation
+        //25% Rel -> 5x passive degradation
+        //10% Rel -> 8.2x passive degradation
+            
+            // Lerp between 1.0x (at 50% HP) and 10.0x (at 0% HP)
+        return Math::Lerp(1.0, 10.0, DegradedProgress);
+    }
     
 
     // ── Accuracy/Evasion-biased damage roll ───────────────────────────────────────
-    // Ported directly from the GAS prototype's RangeIncrement/RangeSize/Lerp
-    // block. StatScale = 6 to match this system's 0-6 Accuracy/Evasion clamp.
-    float RollWeaponDamage(float MinDamage, float MaxDamage, float Accuracy, float Evasion)
+    // StatScale = 6 to match this system's 0-6 Accuracy/Evasion clamp.
+    const float RollWeaponDamage(float MinDamage, float MaxDamage, float Accuracy, float Evasion) 
     {
-        float NewMinDamage = Math::Max(MinDamage, 0);
-        float NewMaxDamage = Math::Max(MaxDamage, 0);
-
-        Print(f"{MinDamage}-{MaxDamage}");
+        //Print(f"{MinDamage}-{MaxDamage}");
 
         //Special case for weapons with a fixed damage value
-        if (NewMinDamage == 0) return MaxDamage;
+        if (MinDamage == 0) return MaxDamage;
 
         float RangeIncrement = Accuracy - Evasion; // -6 to 6
         float RangeSize      = StatScale - Math::Abs(RangeIncrement);
@@ -66,9 +78,9 @@ namespace GameLogic
 
         float RandomAlpha = Math::RandRange(MinValue, MaxValue);
 
-        return (NewMinDamage < NewMaxDamage)
-            ? Math::Lerp(NewMinDamage, NewMaxDamage, RandomAlpha)
-            : Math::Lerp(NewMaxDamage, NewMinDamage, RandomAlpha);
+        return (MinDamage < MaxDamage)
+            ? Math::Lerp(MinDamage, MaxDamage, RandomAlpha)
+            : Math::Lerp(MaxDamage, MinDamage, RandomAlpha);
     }
 
     FDamageCalculationOutput CalculateDamage(const FDamageCalculationInput& Input)
@@ -150,7 +162,7 @@ namespace GameLogic
     float GetShipSpeed(float ShipMaxSpeed, float ShipMass, float SlowdownMultiplier, float ShipReliability, 
         float MultiplierBonuses, float FlatBonuses)
     {
-        float k_weight = Math::GetMappedRangeValueClamped(FVector2D(MinMass, MaxMass), FVector2D(1.0, 0.333), ShipMass);
+        float k_weight = Math::GetMappedRangeValueClamped(FVector2D(MaxSpeedMass, MinSpeedMass), FVector2D(1.0, 0.333), ShipMass);
         float k_slowdown = Math::Clamp(SlowdownMultiplier, 0.5f, 1.0);
         float k_broken = Math::Clamp(ShipReliability, 0.3f,1.0);
 
@@ -212,6 +224,7 @@ namespace GameLogic
                     break;
                 case EStatType::Multiplicative:
                     //Needs a debate whether percentage modifiers are additive or multiplicative (rn it's mult)
+                    //MultiplicativeFactor += Modifier.Value;
                     MultiplicativeFactor *= (1.0 + Modifier.Value);
                     break;
                 case EStatType::Override:
