@@ -108,6 +108,11 @@ class UShipStateComponent : UActorComponent
 
     private bool bChangedLoadout = false;
 
+    UFUNCTION(BlueprintOverride)
+    void BeginPlay()
+    {
+        EquipmentSlots.Add(GameplayTags::SpaceShip_Equipment_Hull, FGameItem());
+    }
 
     // Helper to query whether a slot is currently open on this ship
     bool IsOpenSlot(FGameplayTag SlotTag)
@@ -432,7 +437,7 @@ class UShipStateComponent : UActorComponent
             if (Weapon == nullptr)
                 continue;
 
-            float BaseMaxDamage = Weapon.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_Weapon_MaxDamage);
+            float BaseMaxDamage = Weapon.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_Weapon_MaxDamage);
             if (BaseMaxDamage <= 0.0)
                 BaseMaxDamage = Weapon.MinDamage; // Stats entry not set up yet - fall back to a flat roll
 
@@ -442,7 +447,7 @@ class UShipStateComponent : UActorComponent
             if (TypeTag.IsValid())
                 DamageBonusTags.Add(TypeTag);
 
-            float BaseWeaponRange = Weapon.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_Weapon_Range);
+            float BaseWeaponRange = Weapon.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_Weapon_Range);
             FComputedWeaponStats WeaponStats;
             WeaponStats.MaxDamage = GameLogic::ApplyModifierGroup(BaseMaxDamage, DamageBonusTags, GlobalModifiers);
             WeaponStats.Range = GameLogic::ApplyModifiers(BaseWeaponRange, GameplayTags::SpaceShip_Stat_Positive_Weapon_Range, GlobalModifiers);
@@ -619,7 +624,7 @@ class UShipStateComponent : UActorComponent
         // Upgrade/Micromodule Modifiers only. Ship-wide bonuses (Acrine,
         // Artifacts, Stimulants) are handled separately below and must NOT
         // be folded in here too, or they'd get counted twice.
-        float ShipMaxSpeed = HullFragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+        float ShipMaxSpeed = HullFragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
 
         // Global/Acrine speed bonuses (Psi Matter Accelerator, Stimulant
         // Gaalian Alacrity, an Acrine +50 Speed modifier, ...) live in
@@ -649,7 +654,13 @@ class UShipStateComponent : UActorComponent
     float GetMaxHullPoints()
     {
         UItemHull HullFragment = GetHullFragment();
-        return HullFragment != nullptr ? HullFragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability) : 0.0;
+        return HullFragment != nullptr ? HullFragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability) : 0.0;
+    }
+
+    UFUNCTION(BlueprintPure)
+    float GetMaxShieldPoints()
+    {
+        return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_MaxShieldPoints);
     }
 
     private void ApplyHullDamage(float HullDamage)
@@ -689,17 +700,13 @@ class UShipStateComponent : UActorComponent
         return GameLogic::GetReliabilitySpeedMultiplier(GetHullReliabilityPercent());
     }
 
-    float GetMaxShieldPoints()
-    {
-        return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_MaxShieldPoints, 0.0);
-    }
-
     UFUNCTION()
     void SetShieldsActive(bool bActive)
     {
         bShieldsActive = bActive;
     }
 
+    UFUNCTION(BlueprintPure)
     float GetMaxHeat()
     {
         return GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatCapacity, 0.0);
@@ -726,6 +733,8 @@ class UShipStateComponent : UActorComponent
         FStatModifier Afterburner = FStatModifier(GameplayTags::StatSource_ActiveEffect,
             GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative, 1.0);
         //1.0 -> +100% -> 2x increase
+        //Bad way to do this cause then we need to track whether we switch equipment after activating this
+        //TODO: On turn update we iterate active effects (like Afterburner) then we directly apply durability damage instead
         FStatModifier Degradation = FStatModifier(GameplayTags::StatSource_ActiveEffect, 
             GameplayTags::SpaceShip_Stat_Negative_DurabilityDegradation, EStatType::Multiplicative, 50.0);
 
@@ -770,7 +779,7 @@ class UShipStateComponent : UActorComponent
     }
 
     UFUNCTION()
-    FDamageCalculationOutput ApplyDamage(float UnmitigatedDamage, float ShieldBypass, FGameplayTag DamageType, float GlobalDamageModifier = 1.0)
+    FDamageCalculationOutput ApplyDamage(float UnmitigatedDamage, float ShieldBypass, FGameplayTag DamageType, float GlobalDamageModifier = 1.0, float ArmorNullification  = 1.0)
     {
         FDamageCalculationInput Input;
         Input.SourceUnmitigatedDamage = UnmitigatedDamage;
@@ -779,7 +788,7 @@ class UShipStateComponent : UActorComponent
         Input.TargetCurrentShields = CurrentShieldPoints;
         Input.bTargetHasShieldsActive = bShieldsActive;
         Input.TargetShieldDamageBlock = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShieldGeneratorDamageBlock, 0.0);
-        Input.TargetShipDamageResistance = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShipDamageResistance, 1.0);
+        Input.TargetShipDamageResistance = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShipDamageResistance, 1.0) * ArmorNullification;
         Input.TargetTypeSpecificResistance = GetResistanceForDamageType(DamageType);
         Input.bTargetIsInvulnerable = false;
 
@@ -791,6 +800,7 @@ class UShipStateComponent : UActorComponent
         if (Output.HullDamage > 0.0)
             ApplyHullDamage(Output.HullDamage);
 
+        //Some weapons might have different energy buildup
         AddHeat(GameLogic::CalculateTargetEnergyBuildup(Output.HullDamage, Output.ShieldDamage, 1.0));
 
         return Output;
@@ -821,6 +831,8 @@ class UShipStateComponent : UActorComponent
         float Accuracy = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
         float Evasion = Target.GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Evasion, 0.0);
 
+        float ArmorNullification = Target.GetShipStat(GameplayTags::SpaceShip_Stat_Negative_ArmorNullification, 1.0);
+
         // Per-weapon: this specific weapon's own MaxDamage with DamageGlobal
         // and its own DamageType's bonus already folded in - see
         // RecalculateWeaponDamageCache() and the file header for why this
@@ -835,7 +847,7 @@ class UShipStateComponent : UActorComponent
         // of time.
         float GlobalDamageModifier = 1.0 + GetShipStat(GetFactionTargetTag(Target.Faction), 0.0);
 
-        FDamageCalculationOutput Output = Target.ApplyDamage(RolledDamage, Weapon.ShieldBypass, Weapon.DamageType, GlobalDamageModifier);
+        FDamageCalculationOutput Output = Target.ApplyDamage(RolledDamage, Weapon.ShieldBypass, Weapon.DamageType, GlobalDamageModifier, ArmorNullification);
 
         AddHeat(Weapon.HeatUse); // firing costs the shooter heat too
 
@@ -894,15 +906,15 @@ class UShipStateComponent : UActorComponent
         FGameItem Hull = InstantiateItem(TestHullDefinition);
         UItemHull Fragment = UGameUtility::GetItemFragment(Hull.Fragments, UItemHull);
         Hull.Mass = Math::RoundToInt(Fragment.GetHullMass());
-        float Speed1 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
-        float Dur1 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
+        float Speed1 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+        float Dur1 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
 
         //Fragment.AddModifier(GameplayTags::StatSource_Upgrade, GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative,0.31);
         Fragment.AddModifier(GameplayTags::StatSource_Micromodule1, GameplayTags::SpaceShip_Stat_Positive_MaximumDurability, EStatType::Multiplicative, 0.2);
         Fragment.RecalculateStats();
-        float Speed2 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+        float Speed2 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
         Print(f"Speed:{Speed1}->{Speed2}");
-        float Dur2 = Fragment.GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
+        float Dur2 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
         Print(f"MaxDur:{Dur1}->{Dur2}\nCurrentDur:{Fragment.CurrentDurability}");
 
         //AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Positive_DamageKinetic, EStatType::Additive, 10);

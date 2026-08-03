@@ -159,10 +159,10 @@ class UItemEquipment : UItemFragment
 
     float GetMaximumDurability() const
     {
-        return GetStatValue(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
+        return GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
     }
 
-    float GetStatValue(FGameplayTag StatTag, const float DefaultValue=0.0) const
+    float GetItemStat(FGameplayTag StatTag, const float DefaultValue=0.0) const
     {
         for (const auto& Stat : Stats)
         {
@@ -307,8 +307,8 @@ class UItemHull : UItemEquipment
 	UPROPERTY() FGameplayTagContainer OpenSlots; //Spaceship_Equipment tags
 
 	float GetHullSize() { 
-        return GetStatValue(GameplayTags::SpaceShip_Stat_Positive_CargoCapacity) + 
-               GetStatValue(GameplayTags::SpaceShip_Stat_Positive_EquipmentCapacity); 
+        return GetItemStat(GameplayTags::SpaceShip_Stat_Positive_CargoCapacity) + 
+               GetItemStat(GameplayTags::SpaceShip_Stat_Positive_EquipmentCapacity); 
     }
     float GetHullMass() { return Math::RoundToFloat(GetHullSize() * (0.6 + 0.03 * (TechLevel - 1))); }
 };

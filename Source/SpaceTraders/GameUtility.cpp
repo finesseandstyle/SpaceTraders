@@ -102,59 +102,95 @@ bool UGameUtility::IsActorVisible(APlayerController const* Player, AActor const*
 	return false;
 }
 
-TArray<FVector2D> UGameUtility::DeprojectScreenCornersToPlane(
-	APlayerController* PlayerController,
-	FVector2D Offset,
-	float MinimapScale,
-	float ZPlane
+TArray<FLinearColor> UGameUtility::DeprojectScreenCornersToPlane(
+    APlayerController* PlayerController,
+    FVector2D Offset,
+    float MinimapScale,
+    float ZPlane,
+    float MaxViewDistance // Maximum cutoff distance when looking near/above horizon
 )
 {
-	TArray<FVector2D> MinimapPoints;
+    TArray<FLinearColor> MinimapPoints;
 
-	if (!PlayerController)
-	{
-		return MinimapPoints;
-	}
+    if (!PlayerController || !GEngine || !GEngine->GameViewport)
+    {
+        return MinimapPoints;
+    }
 
-	// Get viewport size
-	FVector2D ViewportSize;
-	GEngine->GameViewport->GetViewportSize(ViewportSize);
-	if (ViewportSize.IsZero())
-	{
-		return MinimapPoints;
-	}
+    FVector2D ViewportSize;
+    GEngine->GameViewport->GetViewportSize(ViewportSize);
+    if (ViewportSize.IsZero())
+    {
+        return MinimapPoints;
+    }
 
-	// Define 4 screen corners
-	TArray<FVector2D> ScreenCorners = {
-		FVector2D(0.f, 0.f),                // Top-left
-		FVector2D(ViewportSize.X, 0.f),        // Top-right
-		FVector2D(ViewportSize.X, ViewportSize.Y), // Bottom-right
-		FVector2D(0.f, ViewportSize.Y),        // Bottom-left
-	};
+    // Define 4 screen corners (TL, TR, BR, BL)
+    TArray<FVector2D> ScreenCorners = {
+        FVector2D(0.f, 0.f),                       	   // Top-left (P1)
+        FVector2D(ViewportSize.X, 0.f),                // Top-right (P2)
+        FVector2D(ViewportSize.X, ViewportSize.Y),     // Bottom-right (P3)
+        FVector2D(0.f, ViewportSize.Y)                 // Bottom-left (P4)
+    };
 
-	for (const FVector2D& ScreenPos : ScreenCorners)
-	{
-		FVector WorldOrigin, WorldDirection;
+    MinimapPoints.Reserve(4);
 
-		if (PlayerController->DeprojectScreenPositionToWorld(ScreenPos.X, ScreenPos.Y, WorldOrigin, WorldDirection))
-		{
-			if (!FMath::IsNearlyZero(WorldDirection.Z))
-			{
-				float t = (ZPlane - WorldOrigin.Z) / WorldDirection.Z;
-				FVector WorldPoint = (WorldOrigin + t * WorldDirection);
+    for (const FVector2D& ScreenPos : ScreenCorners)
+    {
+        FVector WorldOrigin, WorldDirection;
 
-				// Convert to minimap space
-				float MinimapX = WorldPoint.Y * MinimapScale + Offset.X;
-				float MinimapY = -WorldPoint.X * MinimapScale + Offset.Y;
+        if (PlayerController->DeprojectScreenPositionToWorld(ScreenPos.X, ScreenPos.Y, WorldOrigin, WorldDirection))
+        {
+            FVector WorldPoint;
 
-				MinimapPoints.Add(FVector2D(MinimapX, MinimapY));
-				//GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Yellow, FString::Printf(TEXT("World Point %s"), *WorldPoint.ToCompactString()));
-			}
-		}
-	}
+            // Check if the ray points downwards towards the ground plane
+            if (WorldDirection.Z < -0.001f) // Downward ray
+            {
+                float t = (ZPlane - WorldOrigin.Z) / WorldDirection.Z;
+                
+                // If t is positive, it hits the plane in front of the camera
+                if (t > 0.0f)
+                {
+                    // Clamp t so far-away points don't shoot to infinity at low pitch angles
+                    float Dist2D = (WorldDirection * t).Size2D();
+                    if (Dist2D > MaxViewDistance)
+                    {
+                        FVector Dir2D = FVector(WorldDirection.X, WorldDirection.Y, 0.0f).GetSafeNormal();
+                        WorldPoint = WorldOrigin + (Dir2D * MaxViewDistance);
+                        WorldPoint.Z = ZPlane;
+                    }
+                    else
+                    {
+                        WorldPoint = WorldOrigin + (WorldDirection * t);
+                    }
+                }
+                else
+                {
+                    // Fallback for edge cases where camera is below ZPlane
+                    FVector Dir2D = FVector(WorldDirection.X, WorldDirection.Y, 0.0f).GetSafeNormal();
+                    WorldPoint = WorldOrigin + (Dir2D * MaxViewDistance);
+                    WorldPoint.Z = ZPlane;
+                }
+            }
+            else // Ray points horizontal or upwards into the sky
+            {
+                // Clamp the ray to the horizon at MaxViewDistance
+                FVector Dir2D = FVector(WorldDirection.X, WorldDirection.Y, 0.0f).GetSafeNormal();
+                WorldPoint = WorldOrigin + (Dir2D * MaxViewDistance);
+                WorldPoint.Z = ZPlane;
+            }
 
-	return MinimapPoints;
+            // Convert to minimap UV space / offset space
+            float MinimapX = WorldPoint.Y * MinimapScale + Offset.X;
+            float MinimapY = -WorldPoint.X * MinimapScale + Offset.Y;
+
+            // Output as FLinearColor ready for DMI Vector Parameters (R=X, G=Y)
+            MinimapPoints.Add(FLinearColor(MinimapX, MinimapY, 0.f, 1.f));
+        }
+    }
+
+    return MinimapPoints;
 }
+
 
 template<typename T>
 T EaseOutIn(const T& A, const T& B, float Alpha, float Exponent,

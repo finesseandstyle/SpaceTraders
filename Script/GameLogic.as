@@ -1,15 +1,15 @@
 //Used inside the target's state function
 struct FDamageCalculationInput
 {
-    UPROPERTY() float SourceUnmitigatedDamage = 0.0;
-    UPROPERTY() float SourceShieldBypass              = 0.0; // 0-1, from FWeaponProperties
-    UPROPERTY() float TargetCurrentShields       = 0.0;
-    UPROPERTY() bool  bTargetHasShieldsActive            = true;
-    UPROPERTY() float TargetShieldDamageBlock         = 0.0; // from FShieldGeneratorProperties
-    UPROPERTY() float TargetShipDamageResistance      = 1.0; // armor
-    UPROPERTY() float TargetTypeSpecificResistance    = 1.0; // Kinetic/Energetic/Explosive, picked by caller
-    UPROPERTY() float SourceGlobalDamageModifier      = 1.0; // from attacker's GlobalDamage.* bonuses
-    UPROPERTY() bool  bTargetIsInvulnerable           = false;
+    UPROPERTY() float SourceUnmitigatedDamage       = 0.0;
+    UPROPERTY() float SourceShieldBypass            = 0.0; // 0-1, from FWeaponProperties
+    UPROPERTY() float TargetCurrentShields          = 0.0;
+    UPROPERTY() bool  bTargetHasShieldsActive       = true;
+    UPROPERTY() float TargetShieldDamageBlock       = 0.0; // from FShieldGeneratorProperties
+    UPROPERTY() float TargetShipDamageResistance    = 1.0; // armor
+    UPROPERTY() float TargetTypeSpecificResistance  = 1.0; // Kinetic/Energetic/Explosive, picked by caller
+    UPROPERTY() float SourceGlobalDamageModifier    = 1.0; // from attacker's GlobalDamage.* bonuses
+    UPROPERTY() bool  bTargetIsInvulnerable         = false;
 };
 
 struct FDamageCalculationOutput
@@ -29,7 +29,7 @@ namespace GameLogic
     const float StatScale = 6.0;
     const float GShipEnergyBuildupPerDamage = 0.5;
     const float GShipEnergyBuildupPerShieldDamage = 0.5;
-    const float GShipEnergyBuildupPerHullDamage = 0.1;
+    const float GShipEnergyBuildupPerHullDamage = 0.05;
     const float GHullReliabilityThreshold_Major = 25;
     const float GHullReliabilityThreshold_Critical = 10;
     const float GHullReliabilitySpeedMult_Major = 0.75;
@@ -44,7 +44,7 @@ namespace GameLogic
     //Pickups
     const float SnapCollectRadius = 20.0; //When an item's distance is < this, instantly pick up
     const float ContestHysteresis = 1.5;  //How much bigger an opposing actor's score need to be to claim an item.
-    const float ClusterSplitGap = 140.0;  // If the empty space between two items is larger than this, split the stop.
+    const float ClusterSplitGap = 160.0;  // If the empty space between two items is larger than this, split the stop.
 
     const float GetEquipmentDegradationMultiplier(float CurrentDurability, float MaxDurability)
     {

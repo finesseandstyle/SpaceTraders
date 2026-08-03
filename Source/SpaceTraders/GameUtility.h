@@ -37,12 +37,8 @@ public:
 	static bool IsActorVisible(APlayerController const* Player, AActor const* Actor);
 	
 	UFUNCTION(BlueprintCallable, Category = "Minimap|Projection")
-	static TArray<FVector2D> DeprojectScreenCornersToPlane(
-		APlayerController* PlayerController,
-		FVector2D Offset, //156,0
-		float MinimapScale = 0.0015f,
-		float ZPlane = 810.0f		
-	);
+	static TArray<FLinearColor> DeprojectScreenCornersToPlane(APlayerController* PlayerController, FVector2D Offset=FVector2D(0.5f,0.5f),
+	                                                          float MinimapScale=0.0015f, float ZPlane=6100.f, float MaxViewDistance=10000.f);
 
 	/** Interpolates between A and B with an Ease Out-In curve: fast at start and end, slow in the middle */
 	UFUNCTION(BlueprintPure, Category = "Interpolation")

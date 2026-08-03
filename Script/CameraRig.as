@@ -16,7 +16,7 @@ class ACameraRig : APawn
     UPROPERTY(Category = "Camera Config") float ScrollSpeed = 2;
     UPROPERTY(Category = "Camera Config") float ZoomIncrement = 4000;
     UPROPERTY(Category = "Camera Config") float DefaultPitch = -80;
-    UPROPERTY(Category = "Camera Config") float WithRotationPitch = -25;
+    UPROPERTY(Category = "Camera Config") float WithRotationPitch = -35;
     UPROPERTY(Category = "Camera Config") float ZLevel = 6100;
     UPROPERTY(Category = "Camera Config") float LookAhead = 900; // Max distance (in pixels/units) the camera will shift ahead
     UPROPERTY(Category = "Camera Config") float SwayDistance = 350;
