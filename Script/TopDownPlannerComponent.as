@@ -58,11 +58,23 @@ class UTopDownPlannerComponent : UActorComponent
     UPROPERTY() ETurnMovementType MovementType = ETurnMovementType::Fly;
     UPROPERTY() AActor LandingObject;
     UPROPERTY() ATurnMarker TurnMarker;
-    //UPROPERTY() AActor smthelse
+
     private bool bHasResult;
     private FTimerHandle HidePathHandle;
 
     private FCollisionQueryParams Params;
+
+    // Segmented ring material
+    UPROPERTY(Category = "Range Ring")
+    UMaterialInterface RingMaterial;
+    UPROPERTY(Category = "Range Ring")
+    UStaticMesh RingMesh;
+
+    private URangeIndicatorComponent PickupRangeIndicator;
+    private URangeIndicatorComponent RadarRangeIndicator;
+    private URangeIndicatorComponent WeaponMinRangeIndicator;
+    private URangeIndicatorComponent WeaponMaxRangeIndicator;
+    private URangeIndicatorComponent DamageFalloffIndicator;
 
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
@@ -77,6 +89,91 @@ class UTopDownPlannerComponent : UActorComponent
         //SetTickGroup(ETickingGroup::TG_PostPhysics);
         TurnMarker.SetActorHiddenInGame(true);
         MoveComp = PlayerShip.GetComponentByClass(UTurnBasedMovementComponent); 
+        InitializeRangeIndicator();
+    }
+
+    private void InitializeRangeIndicator()
+    {
+        AActor OwnerActor = GetOwner();
+        if (OwnerActor == nullptr)
+            return;
+
+        USceneComponent RootComp = PlayerShip.GetRootComponent();
+        if (RootComp == nullptr)
+            return;
+
+        // 1. Pickup Range (Pure Blue)
+        PickupRangeIndicator = CreateRangeIndicator(
+            RootComp, 
+            n"PickupRangeIndicator", 
+            FLinearColor(0.0, 0.4f, 1.0, 1.0) // Vibrant Blue
+        );
+
+        // 2. Radar Range (Green)
+        RadarRangeIndicator = CreateRangeIndicator(
+            RootComp, 
+            n"RadarRangeIndicator", 
+            FLinearColor(0.0, 1.0, 0.2f, 1.0) // Vibrant Green
+        );
+
+        // 3. Weapon Min Range (Red)
+        WeaponMinRangeIndicator = CreateRangeIndicator(
+            RootComp, 
+            n"WeaponMinRangeIndicator", 
+            FLinearColor(1.0, 0.0, 0.0, 1.0) // Vibrant Red
+        );
+
+        // 4. Weapon Max Range (Red)
+        WeaponMaxRangeIndicator = CreateRangeIndicator(
+            RootComp, 
+            n"WeaponMaxRangeIndicator", 
+            FLinearColor(1.0, 0.0, 0.0, 1.0) // Vibrant Red
+        );
+
+        // 5. Weapon Damage Falloff Range (Grey)
+        DamageFalloffIndicator = CreateRangeIndicator(
+            RootComp, 
+            n"DamageFalloffIndicator", 
+            FLinearColor(0.05, 0.05, 0.05)
+        );
+
+        PickupRangeIndicator.SetRingMaterial(RingMesh, RingMaterial);
+        RadarRangeIndicator.SetRingMaterial(RingMesh, RingMaterial);
+        WeaponMinRangeIndicator.SetRingMaterial(RingMesh, RingMaterial);
+        WeaponMaxRangeIndicator.SetRingMaterial(RingMesh, RingMaterial);
+        DamageFalloffIndicator.SetRingMaterial(RingMesh, RingMaterial);
+
+        PickupRangeIndicator.SetRelativeLocation(FVector(0,0,-1));
+        RadarRangeIndicator.SetRelativeLocation(FVector(0,0,0));
+        WeaponMinRangeIndicator.SetRelativeLocation(FVector(0,0,2));
+        WeaponMaxRangeIndicator.SetRelativeLocation(FVector(0,0,-2));
+        DamageFalloffIndicator.SetRelativeLocation(FVector(0,0,1));
+
+        PickupRangeIndicator.SetRadius(1200);
+        RadarRangeIndicator.SetRadius(24000*2);
+        WeaponMinRangeIndicator.SetRadius(2500);
+        WeaponMaxRangeIndicator.SetRadius(4000);
+        DamageFalloffIndicator.SetRadius(5000);
+    }
+
+    // Helper to spawn, scale, attach, and color individual range billboards
+    private URangeIndicatorComponent CreateRangeIndicator(USceneComponent Parent, FName ComponentName, FLinearColor Color)
+    {
+        // Create component attached to the ship
+        URangeIndicatorComponent Billboard = Cast<URangeIndicatorComponent>(
+            PlayerShip.CreateComponent(URangeIndicatorComponent, ComponentName)
+        );
+
+        if (Billboard == nullptr)
+            return nullptr;
+
+        Billboard.AttachToComponent(Parent);
+        
+        // Scale component by 10 as specified
+        Billboard.SetRelativeScale3D(FVector(10.0, 10.0, 10.0));
+        Billboard.CoreColor = Color;
+
+        return Billboard;
     }
 
     UFUNCTION(BlueprintOverride)
