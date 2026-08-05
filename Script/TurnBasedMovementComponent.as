@@ -57,6 +57,13 @@ struct FStopEvent
     float StopDistance = 0.0;
     FVector StopLocation = FVector::ZeroVector;
     TArray<AActor> PendingItems;
+
+    FStopEvent(float InStopDistance, FVector InStopLocation, TArray<AActor> InPendingItems)
+    {
+        StopDistance = InStopDistance;
+        StopLocation = InStopLocation;
+        PendingItems = InPendingItems;
+    }
 };
 
 struct FTurnState
@@ -154,16 +161,13 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION(BlueprintOverride)
     void Tick(float DeltaSeconds)
     {
-        if (PathSpline == nullptr || MovementState == EShipMovementState::NoPathDefined)
-            return;
-
         if (MovementState == EShipMovementState::StoppedForPickup)
         {
             TickPickup(DeltaSeconds);
             return;
         }
 
-        if (MovementState != EShipMovementState::Moving)
+        if (PathSpline == nullptr || MovementState != EShipMovementState::Moving)
             return;
 
         // --- Position update ---
@@ -251,6 +255,7 @@ class UTurnBasedMovementComponent : UActorComponent
 
         if (!HasPathDefined())
         {
+            MovementState = (bImmediatePickup) ? EShipMovementState::StoppedForPickup : EShipMovementState::NoPathDefined;
             SetComponentTickEnabled(true);
             return;
         }
@@ -814,7 +819,7 @@ class UTurnBasedMovementComponent : UActorComponent
         {
             // No spline queries here anymore -- OptDist/ActualDist already computed
             // once, in ComputeReachableWindows.
-            float Weight = 1.0f / Math::Max(Win.ActualDist - GameLogic::SnapCollectRadius, 1.0f);
+            float Weight = 1.0 / Math::Max(Win.ActualDist - GameLogic::SnapCollectRadius, 1.0);
             SumWeightedOpt += Win.OptDist * Weight;
             SumWeights += Weight;
         }
@@ -846,6 +851,29 @@ class UTurnBasedMovementComponent : UActorComponent
         bImmediatePickup = false;
         CurrentTurnState.RemainingPlan.Empty();
 
+        if (!HasPathDefined())
+        {
+            //Get all items in range add them to the queue
+            bool bFoundItems = false;
+            TArray<AActor> PendingItems;
+            for (AActor Item : CandidateItems)
+            {
+                float ItemDist = GetItemLocation(Item).Distance(GetOwner().ActorLocation);
+                if (ItemDist <= TractorBeamRadius)
+                {
+                    CurrentTurnState.BeamQueue.Add(Item);
+                    PendingItems.Add(Item);
+                    bFoundItems = true;
+                }
+            }
+
+            if (bFoundItems)
+            {
+                CurrentTurnState.RemainingPlan.Add(FStopEvent(0, GetOwner().ActorLocation, PendingItems));
+            }
+        
+        }
+
         if (CandidateItems.Num() > 0 && PathSpline != nullptr)
         {
             float SplineLength = PathSpline.GetSplineLength();
@@ -854,8 +882,9 @@ class UTurnBasedMovementComponent : UActorComponent
 
             for (FStopEvent& Stop : Stops)
             {
-                if (IsTooCloseToSplineEnd(Stop, SplineLength))
-                    continue;
+                
+                //if (IsTooCloseToSplineEnd(Stop, SplineLength))
+                    //continue;
 
                 //Might not even be needed
                 //UGameUtility::SortActorsOnDistance(Stop.PendingItems, Stop.StopLocation);
@@ -1120,4 +1149,4 @@ class UTurnBasedMovementComponent : UActorComponent
 
         PathSpline.UpdateSpline();
     }
-};
+}

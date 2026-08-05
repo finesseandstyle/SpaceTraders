@@ -83,7 +83,7 @@ class UShipStateComponent : UActorComponent
     // DamageGlobal/DamageType bonuses are folded in. Kept separate from
     // CachedShipStats since these bonuses resolve per-weapon, not ship-wide -
     // see the file header and RecalculateWeaponDamageCache().
-    private TMap<FGameplayTag, FComputedWeaponStats> CachedWeaponMaxDamage;
+    private TMap<FGameplayTag, FComputedWeaponStats> CachedWeaponStats;
 
     private bool bStatsDirty = true;
 
@@ -184,7 +184,7 @@ class UShipStateComponent : UActorComponent
     FTractorBeamProperties GetTractorBeamProps() 
     {
         FTractorBeamProperties Props;
-        Props.Range = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_TractorBeamRange);
+        Props.Range = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_TractorBeamRange) * 10;
         Props.Speed = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_TractorBeamSpeed);
         Props.SimulPickups = Math::RoundToInt(GetShipStat(GameplayTags::SpaceShip_Stat_Positive_TractorBeamSimulPickups));
 
@@ -357,6 +357,8 @@ class UShipStateComponent : UActorComponent
     // FGValue matters: additive stats (MaxShieldPoints, EnergyCapacity)
     // should default to 0 when absent, but multiplicative ones (resistances)
     // need to default to 1 or missing equipment would zero out all damage.
+    // Ship Stats should default to a value otherwise they'll have flat modifiers 
+    // even if the respective equipment is missing
     UFUNCTION()
     float GetShipStat(FGameplayTag StatTag, float DefaultValue = 0.0)
     {
@@ -376,7 +378,7 @@ class UShipStateComponent : UActorComponent
     private void RecalculateShipStats()
     {
         CachedShipStats.Empty();
-        CachedWeaponMaxDamage.Empty();
+        CachedWeaponStats.Empty();
 
         for (const auto& BaseStat : CharacterStats)
             CachedShipStats.Add(BaseStat.StatTag, BaseStat.BaseValue);
@@ -451,7 +453,7 @@ class UShipStateComponent : UActorComponent
             FComputedWeaponStats WeaponStats;
             WeaponStats.MaxDamage = GameLogic::ApplyModifierGroup(BaseMaxDamage, DamageBonusTags, GlobalModifiers);
             WeaponStats.Range = GameLogic::ApplyModifiers(BaseWeaponRange, GameplayTags::SpaceShip_Stat_Positive_Weapon_Range, GlobalModifiers);
-            CachedWeaponMaxDamage.Add(SlotTag, WeaponStats);
+            CachedWeaponStats.Add(SlotTag, WeaponStats);
         }
     }
 
@@ -461,7 +463,7 @@ class UShipStateComponent : UActorComponent
     float GetEffectiveWeaponMaxDamage(FGameplayTag WeaponSlotTag)
     {
         RecalculateShipStatsIfDirty();
-        return CachedWeaponMaxDamage.Contains(WeaponSlotTag) ? CachedWeaponMaxDamage[WeaponSlotTag].MaxDamage : 0.0;
+        return CachedWeaponStats.Contains(WeaponSlotTag) ? CachedWeaponStats[WeaponSlotTag].MaxDamage : 0.0;
     }
 
     UFUNCTION()
@@ -900,6 +902,9 @@ class UShipStateComponent : UActorComponent
     UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
     UItemDefinition TestTractorBeamDefinition;
 
+    UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
+    UItemDefinition TestRadarDefinition;
+
     UFUNCTION()
     void RunSelfTest()
     {
@@ -932,6 +937,9 @@ class UShipStateComponent : UActorComponent
 
         if (TestTractorBeamDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_TractorBeam, InstantiateItem(TestTractorBeamDefinition));
+        
+        if (TestRadarDefinition != nullptr)
+            EquipItem(GameplayTags::SpaceShip_Equipment_Radar, InstantiateItem(TestRadarDefinition));
 
 
         FStatAttribute Accuracy = FStatAttribute(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);

@@ -70,11 +70,16 @@ class UTopDownPlannerComponent : UActorComponent
     UPROPERTY(Category = "Range Ring")
     UStaticMesh RingMesh;
 
-    private URangeIndicatorComponent PickupRangeIndicator;
-    private URangeIndicatorComponent RadarRangeIndicator;
-    private URangeIndicatorComponent WeaponMinRangeIndicator;
-    private URangeIndicatorComponent WeaponMaxRangeIndicator;
-    private URangeIndicatorComponent DamageFalloffIndicator;
+    UPROPERTY() FLinearColor PickupColor = FLinearColor(0.0, 0.0, 1.0);
+    UPROPERTY() FLinearColor RadarColor = FLinearColor(0.00, 0.70, 0.00);
+    UPROPERTY() FLinearColor WeaponColor = FLinearColor(1.00, 0.00, 0.00);
+    UPROPERTY() FLinearColor FalloffColor = FLinearColor(0.05, 0.05, 0.05, 1.0);
+
+    UPROPERTY() URangeIndicatorComponent PickupRangeIndicator;
+    UPROPERTY() URangeIndicatorComponent RadarRangeIndicator;
+    UPROPERTY() URangeIndicatorComponent WeaponMinRangeIndicator;
+    UPROPERTY() URangeIndicatorComponent WeaponMaxRangeIndicator;
+    UPROPERTY() URangeIndicatorComponent DamageFalloffIndicator;
 
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
@@ -102,40 +107,11 @@ class UTopDownPlannerComponent : UActorComponent
         if (RootComp == nullptr)
             return;
 
-        // 1. Pickup Range (Pure Blue)
-        PickupRangeIndicator = CreateRangeIndicator(
-            RootComp, 
-            n"PickupRangeIndicator", 
-            FLinearColor(0.0, 0.4f, 1.0, 1.0) // Vibrant Blue
-        );
-
-        // 2. Radar Range (Green)
-        RadarRangeIndicator = CreateRangeIndicator(
-            RootComp, 
-            n"RadarRangeIndicator", 
-            FLinearColor(0.0, 1.0, 0.2f, 1.0) // Vibrant Green
-        );
-
-        // 3. Weapon Min Range (Red)
-        WeaponMinRangeIndicator = CreateRangeIndicator(
-            RootComp, 
-            n"WeaponMinRangeIndicator", 
-            FLinearColor(1.0, 0.0, 0.0, 1.0) // Vibrant Red
-        );
-
-        // 4. Weapon Max Range (Red)
-        WeaponMaxRangeIndicator = CreateRangeIndicator(
-            RootComp, 
-            n"WeaponMaxRangeIndicator", 
-            FLinearColor(1.0, 0.0, 0.0, 1.0) // Vibrant Red
-        );
-
-        // 5. Weapon Damage Falloff Range (Grey)
-        DamageFalloffIndicator = CreateRangeIndicator(
-            RootComp, 
-            n"DamageFalloffIndicator", 
-            FLinearColor(0.05, 0.05, 0.05)
-        );
+        PickupRangeIndicator = CreateRangeIndicator(RootComp, n"PickupRangeIndicator", PickupColor);    
+        RadarRangeIndicator = CreateRangeIndicator(RootComp, n"RadarRangeIndicator", RadarColor);
+        WeaponMinRangeIndicator = CreateRangeIndicator(RootComp, n"WeaponMinRangeIndicator", WeaponColor);
+        WeaponMaxRangeIndicator = CreateRangeIndicator(RootComp, n"WeaponMaxRangeIndicator", WeaponColor);
+        DamageFalloffIndicator = CreateRangeIndicator(RootComp, n"DamageFalloffIndicator", FalloffColor);
 
         PickupRangeIndicator.SetRingMaterial(RingMesh, RingMaterial);
         RadarRangeIndicator.SetRingMaterial(RingMesh, RingMaterial);
@@ -143,6 +119,7 @@ class UTopDownPlannerComponent : UActorComponent
         WeaponMaxRangeIndicator.SetRingMaterial(RingMesh, RingMaterial);
         DamageFalloffIndicator.SetRingMaterial(RingMesh, RingMaterial);
 
+        //Prevent Z fighting
         PickupRangeIndicator.SetRelativeLocation(FVector(0,0,-1));
         RadarRangeIndicator.SetRelativeLocation(FVector(0,0,0));
         WeaponMinRangeIndicator.SetRelativeLocation(FVector(0,0,2));
@@ -150,7 +127,7 @@ class UTopDownPlannerComponent : UActorComponent
         DamageFalloffIndicator.SetRelativeLocation(FVector(0,0,1));
 
         PickupRangeIndicator.SetRadius(1200);
-        RadarRangeIndicator.SetRadius(24000*2);
+        RadarRangeIndicator.SetRadius(94000);
         WeaponMinRangeIndicator.SetRadius(2500);
         WeaponMaxRangeIndicator.SetRadius(4000);
         DamageFalloffIndicator.SetRadius(5000);
@@ -171,7 +148,7 @@ class UTopDownPlannerComponent : UActorComponent
         
         // Scale component by 10 as specified
         Billboard.SetRelativeScale3D(FVector(10.0, 10.0, 10.0));
-        Billboard.CoreColor = Color;
+        Billboard.BaseColor = Color;
 
         return Billboard;
     }

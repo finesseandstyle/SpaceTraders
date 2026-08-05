@@ -11,10 +11,10 @@ class ACameraRig : APawn
     UCameraComponent Camera;
 
     // --- Config ---
-    UPROPERTY(Category = "Camera Config") float MinZoom = 3000;
-    UPROPERTY(Category = "Camera Config") float MaxZoom = 23000;
     UPROPERTY(Category = "Camera Config") float ScrollSpeed = 2;
     UPROPERTY(Category = "Camera Config") float ZoomIncrement = 4000;
+    UPROPERTY(Category = "Camera Config") float MinZoom = 3000;
+    UPROPERTY(Category = "Camera Config") float MaxZoom = MinZoom + (ZoomIncrement * 10);
     UPROPERTY(Category = "Camera Config") float DefaultPitch = -80;
     UPROPERTY(Category = "Camera Config") float WithRotationPitch = -35;
     UPROPERTY(Category = "Camera Config") float ZLevel = 6100;
