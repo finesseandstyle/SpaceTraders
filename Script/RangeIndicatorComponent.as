@@ -2,6 +2,9 @@ const float BaseRotationSpeed = 40;
 const float DashRatio = 0.5;
 const float MinSections = 24.0;
 
+// A segmented ring material on a plane mesh to communicate the interaction 
+//range of an ability or equipment, like a radar, weapon or tractor beam
+//Use SetRingMaterial with the default plane mesh, set a color and radius
 class URangeIndicatorComponent : UStaticMeshComponent
 {
     UPROPERTY() FLinearColor BaseColor = FLinearColor(0.0, 0.0, 1.0, 1.0); // Bright Cyan
@@ -10,7 +13,8 @@ class URangeIndicatorComponent : UStaticMeshComponent
     private UMaterialInstanceDynamic DynamicMaterial;
     private float WorldRadius;
 
-    default SetAbsolute(false, true, false);
+    //It's so that the ring doesn't roll with the ship
+    default SetAbsolute(false, true, true);
     default SetVisibility(false);
 
     UFUNCTION()

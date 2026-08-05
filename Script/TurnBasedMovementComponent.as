@@ -135,8 +135,8 @@ class UTurnBasedMovementComponent : UActorComponent
     FTurnState CurrentTurnState;
 
     UPROPERTY(Category = "Pickup") float TractorBeamRadius = 700.0;
-    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 1500.0;
-    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 1;
+    UPROPERTY(Category = "Pickup") float TractorBeamPullSpeed = 2500.0;
+    UPROPERTY(Category = "Pickup") int32 MaxSimultaneousPickups = 3;
 
     private TArray<AActor> PickupTargets;
     private TArray<AActor> TempTargets;
@@ -299,7 +299,7 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void ResumeFromPickup()
     {
-        if (!IsStoppedForPickup())
+        if (!IsStoppedForPickup() || !HasPathDefined())
             return;
 
         StoppedTimeEnd = StoppedTimeEnd + CachedGameState.NormalizedTurnProgress - StoppedTimeStart;
@@ -870,6 +870,8 @@ class UTurnBasedMovementComponent : UActorComponent
             if (bFoundItems)
             {
                 CurrentTurnState.RemainingPlan.Add(FStopEvent(0, GetOwner().ActorLocation, PendingItems));
+                bImmediatePickup = true;
+                return;
             }
         
         }

@@ -44,7 +44,7 @@ namespace GameLogic
     //Pickups
     const float SnapCollectRadius = 20.0; //When an item's distance is < this, instantly pick up
     const float ContestHysteresis = 1.5;  //How much bigger an opposing actor's score need to be to claim an item.
-    const float ClusterSplitGap = 160.0;  // If the empty space between two items is larger than this, split the stop.
+    const float ClusterSplitGap = 150.0;  // If the empty space between two items is larger than this, split the stop.
 
     const float GetEquipmentDegradationMultiplier(float CurrentDurability, float MaxDurability)
     {
