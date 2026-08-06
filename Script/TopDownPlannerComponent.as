@@ -33,7 +33,7 @@ class UTopDownPlannerComponent : UActorComponent
 {
     UPROPERTY() FOnHoveredObjectChanged OnHoveredObjectChanged;
 
-    UPROPERTY() FVector PlayfieldLocation;
+    UPROPERTY() FVector PlayfieldLocation; //Should be aligned with GameState's MaxZPlane
     UPROPERTY() FVector ScrollingLocation;
     
     UPROPERTY() AGameObject SelectedObject;
@@ -134,6 +134,7 @@ class UTopDownPlannerComponent : UActorComponent
     }
 
     // Helper to spawn, scale, attach, and color individual range billboards
+    //TODO: Consolidate SetRingMaterial, ZLevel and radius all in here.
     private URangeIndicatorComponent CreateRangeIndicator(USceneComponent Parent, FName ComponentName, FLinearColor Color)
     {
         // Create component attached to the ship
@@ -147,7 +148,7 @@ class UTopDownPlannerComponent : UActorComponent
         Billboard.AttachToComponent(Parent);
         
         // Scale component by 10 as specified
-        Billboard.SetRelativeScale3D(FVector(10.0, 10.0, 10.0));
+        Billboard.SetWorldScale3D(FVector(10.0, 10.0, 10.0));
         Billboard.BaseColor = Color;
 
         return Billboard;

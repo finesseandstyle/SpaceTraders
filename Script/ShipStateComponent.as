@@ -542,17 +542,17 @@ class UShipStateComponent : UActorComponent
 
     private UItemHull GetHullFragment()
     {
-        return UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_Hull].Fragments, UItemHull);
+        return Cast<UItemHull>(UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_Hull].Fragments, UItemHull));
     }
 
     private UItemFuelTank GetFuelTankFragment()
     {
-        return UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_FuelTank].Fragments, UItemFuelTank);
+        return Cast<UItemFuelTank>(UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_FuelTank].Fragments, UItemFuelTank));
     }
 
     private UItemWeapon GetWeaponFragment(FGameplayTag WeaponSlot)
     {
-        return UGameUtility::GetItemFragment(EquipmentSlots[WeaponSlot].Fragments, UItemWeapon);
+        return Cast<UItemWeapon>(UGameUtility::GetItemFragment(EquipmentSlots[WeaponSlot].Fragments, UItemWeapon));
     }
 
     private void GrantSlotsFromHull()
@@ -909,7 +909,7 @@ class UShipStateComponent : UActorComponent
     void RunSelfTest()
     {
         FGameItem Hull = InstantiateItem(TestHullDefinition);
-        UItemHull Fragment = UGameUtility::GetItemFragment(Hull.Fragments, UItemHull);
+        UItemHull Fragment = Cast<UItemHull>(UGameUtility::GetItemFragment(Hull.Fragments, UItemHull));
         Hull.Mass = Math::RoundToInt(Fragment.GetHullMass());
         float Speed1 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
         float Dur1 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);

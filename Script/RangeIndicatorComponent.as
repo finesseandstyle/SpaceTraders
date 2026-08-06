@@ -16,6 +16,7 @@ class URangeIndicatorComponent : UStaticMeshComponent
     //It's so that the ring doesn't roll with the ship
     default SetAbsolute(false, true, true);
     default SetVisibility(false);
+    default SetCastShadow(false);
 
     UFUNCTION()
     void SetRingMaterial(UStaticMesh Plane, UMaterialInterface BaseMaterial)
