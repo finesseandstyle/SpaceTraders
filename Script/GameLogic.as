@@ -228,9 +228,7 @@ namespace GameLogic
                     AdditiveSum += Modifier.Value;
                     break;
                 case EStatType::Multiplicative:
-                    //Needs a debate whether percentage modifiers are additive or multiplicative (rn it's mult)
-                    //MultiplicativeFactor += Modifier.Value;
-                    MultiplicativeFactor *= (1.0 + Modifier.Value);
+                    MultiplicativeFactor += Modifier.Value;
                     break;
                 case EStatType::Override:
                     bHasOverride = true;
@@ -270,7 +268,7 @@ namespace GameLogic
                 continue;
 
             if (Modifier.Type == EStatType::Multiplicative)
-                MultiplicativeFactor *= (1.0 + Modifier.Value);
+                MultiplicativeFactor += Modifier.Value;
             else if (Modifier.Type == EStatType::Additive)
                 AdditiveSum += Modifier.Value;
         }
@@ -294,7 +292,7 @@ namespace GameLogic
                 continue;
 
             if (Modifier.Type == EStatType::Multiplicative)
-                Result.MultiplicativeFactor *= (1.0 + Modifier.Value);
+                Result.MultiplicativeFactor += Modifier.Value;
             else if (Modifier.Type == EStatType::Additive)
                 Result.AdditiveSum += Modifier.Value;
         }

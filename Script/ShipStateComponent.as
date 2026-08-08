@@ -66,7 +66,7 @@ struct FActiveEffect
 {
     UPROPERTY() float Duration = 1.0; //In Turns, -1 means forever. Every turn we subtract 1 until it's eliminated
     UPROPERTY() float Value = 0.0; //To use booleans use 0.0 or 1.0
-    UPROPERTY() float Stacks = 1.0; //Magnitude of the effect 
+    UPROPERTY() float Stacks = 1.0; //Magnitude of the effect
 
     FActiveEffect(float InDuration, float InValue, float InStacks)
     {
@@ -784,10 +784,7 @@ class UShipStateComponent : UActorComponent
         //1.0 -> +100% -> 2x increase
         //Bad way to do this cause then we need to track whether we switch equipment after activating this
         //TODO: On turn update we iterate active effects (like Afterburner) then we directly apply durability damage instead
-        FStatModifier Degradation = FStatModifier(GameplayTags::StatSource_ActiveEffect, 
-            GameplayTags::SpaceShip_Stat_Negative_DurabilityDegradation, EStatType::Multiplicative, 50.0);
-
-        UItemHull Hull = GetHullFragment();
+        //FStatModifier Degradation = FStatModifier(GameplayTags::StatSource_ActiveEffect, GameplayTags::SpaceShip_Stat_Negative_DurabilityDegradation, EStatType::Multiplicative, 50.0);
 
         //TODO: fetch from Active Effect Rule Data table
 
@@ -797,15 +794,14 @@ class UShipStateComponent : UActorComponent
         if(Active)
         {
             AddGlobalModifierStat(Afterburner);
-            Hull.AddModifier(Degradation);
             ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_Afterburner, FActiveEffect(-1, 1.0, 0));
+            //ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_EquipmentDegradation, FActiveEffect(-1, 1.0, 0, GameplayTags::SpaceShip_Equipment_Hull));
             Print("Added Afteburners");
             UpdateSpeed();
         }
         else
         {
             RemoveGlobalModifier(Afterburner);
-            Hull.RemoveModifier(Degradation);
             ActiveEffects.Remove(GameplayTags::SpaceShip_ActiveEffect_Afterburner);
             Print("Removed Afteburners");
             UpdateSpeed();
