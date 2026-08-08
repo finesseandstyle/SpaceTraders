@@ -65,12 +65,11 @@ namespace GameLogic
     // StatScale = 6 to match this system's 0-6 Accuracy/Evasion clamp.
     const float RollWeaponDamage(float MinDamage, float MaxDamage, float Accuracy, float Evasion) 
     {
-        //Print(f"{MinDamage}-{MaxDamage}");
-
         //Special case for weapons with a fixed damage value
         if (MinDamage == 0) return MaxDamage;
 
-        float RangeIncrement = Accuracy - Evasion; // -6 to 6
+        //Accuracy can be increased past its maximum
+        float RangeIncrement = Math::Clamp(Accuracy - Evasion, -StatScale, StatScale); // -6 to 6
         float RangeSize      = StatScale - Math::Abs(RangeIncrement);
 
         float MinValue = (RangeIncrement + StatScale - RangeSize) / (StatScale * 2);
@@ -100,21 +99,25 @@ namespace GameLogic
             RawShieldDamage = Input.SourceUnmitigatedDamage * (1.0 - Input.SourceShieldBypass);
             RawHealthDamage = Input.SourceUnmitigatedDamage * Input.SourceShieldBypass;
 
-            // Apply Shield Damage Block flat reduction before checking shield depletion/overflow
-            RawShieldDamage = Math::Max(0.0, RawShieldDamage - Input.TargetShieldDamageBlock);
+            RawShieldDamage = Math::Max(0.0, RawShieldDamage);
 
-            // Handle shield overflow: excess damage beyond current shield points spills over to health
+            // Handle shield overflow: excess damage beyond current shield points
             if (RawShieldDamage > Input.TargetCurrentShields)
             {
                 float OverflowDamage = RawShieldDamage - Input.TargetCurrentShields;
                 RawShieldDamage = Input.TargetCurrentShields;
-                RawHealthDamage += OverflowDamage;
+
+                // ONLY spill excess shield damage over to hull if the weapon/source has shield bypass
+                if (Input.SourceShieldBypass > 0.0)
+                {
+                    RawHealthDamage += OverflowDamage;
+                }
             }
 
             Output.ShieldDamage = Math::RoundToFloat(RawShieldDamage);
 
-            // Fast-path: If full hit went to shields (0% bypass) and shields didn't break, no health damage occurs
-            if (Input.SourceShieldBypass <= 0.0 && RawHealthDamage <= 0.0)
+            // Fast-path: If shields didn't break and no raw health damage exists, exit early
+            if (RawHealthDamage <= 0.0)
             {
                 return Output;
             }
@@ -123,9 +126,9 @@ namespace GameLogic
         // Apply resistances, global modifiers, and armor block to health portion
         float FinalHullDamage = (RawHealthDamage * Input.SourceGlobalDamageModifier 
                                                 * Input.TargetShipDamageResistance 
-                                                * Input.TargetTypeSpecificResistance);
+                                                * Input.TargetTypeSpecificResistance - Input.TargetShieldDamageBlock);
 
-        // Ensure a successful hit that bypasses or breaks shields does at least 1 point of damage
+        // Ensure a successful hit that bypasses or breaks shields (with bypass > 0) does at least 1 point of damage
         Output.HullDamage = Math::RoundToFloat(Math::Max(FinalHullDamage, 1.0));
 
         return Output;
@@ -165,16 +168,18 @@ namespace GameLogic
         float k_weight = Math::GetMappedRangeValueClamped(FVector2D(MaxSpeedMass, MinSpeedMass), FVector2D(1.0, 0.333), ShipMass);
         float k_slowdown = Math::Clamp(SlowdownMultiplier, 0.5f, 1.0);
         float k_broken = Math::Clamp(ShipReliability, 0.3f,1.0);
+        
 
-        // SpeedKoef = e^(-4thRoot( Sum( ln^4(k_i) ) ))
+        // SpeedCoeficient = e^(-4thRoot( Sum( ln^4(k_i) ) ))
         float SumLn4 = Math::Pow(Math::Loge(k_weight), 4.0);
         SumLn4 += Math::Pow(Math::Loge(k_slowdown), 4.0);
         SumLn4 += Math::Pow(Math::Loge(k_broken), 4.0);
+        //Aggregate negative custom multipliers here , positive ones are calculated below
 
-        float SpeedKoef = Math::Exp(-Math::Pow(SumLn4, 0.25));
+        float SpeedCoeficient = Math::Exp(-Math::Pow(SumLn4, 0.25));
 
         //Flat bonuses before scaling
-        float RawSpeed = (ShipMaxSpeed * SpeedKoef * MultiplierBonuses) + FlatBonuses;
+        float RawSpeed = (ShipMaxSpeed * SpeedCoeficient * MultiplierBonuses) + FlatBonuses;
 
         float FinalSpeed = RawSpeed;
 

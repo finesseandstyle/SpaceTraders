@@ -463,6 +463,21 @@ class UTurnBasedMovementComponent : UActorComponent
         Days = Math::CeilToInt(Distance * 1.0 / (CurrentSpeed / 10.0));
     }
 
+    //Assumes a well formed path
+    UFUNCTION()
+    TArray<FVector> GetPathWaypoints()
+    {
+        //Every 3rd point is a waypoint
+        TArray<FVector> Waypoints;
+        for (int32 i = 3; i <= PathSpline.NumberOfSplinePoints; i+=3)
+        {
+            FVector Loc = PathSpline.GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World);
+            Waypoints.Add(Loc);
+            //System::DrawDebugSphere(Loc, Duration=4);
+        }
+        return Waypoints;
+    }
+
     UFUNCTION()
     bool QueuePathMidTurn(FVector DestinationLocation, FVector &out AdjustedLocation, int&out Distance, int&out Days)
     {
@@ -615,6 +630,7 @@ class UTurnBasedMovementComponent : UActorComponent
         return true;
     }
 
+    UFUNCTION()
     bool SetNewWaypoint(const FVector DestinationLocation, FVector&out AdjustedLocation, int32&out Distance, int32&out Days)
     {
         if (PathSpline == nullptr || Owner == nullptr)
