@@ -470,7 +470,29 @@ class UTurnBasedMovementComponent : UActorComponent
         Days = Math::CeilToInt(Distance * 1.0 / (CurrentSpeed / 10.0));
     }
 
-    //Assumes a well formed path
+    UFUNCTION()
+    void UpdateSpeed(float MaxSpeedStat, FVector&out AdjustedLocation, int&out Distance, int&out Days)
+    {
+        CurrentSpeed = MaxSpeedStat * 10; //Max Speed Stat is the ShipState's Stat
+
+        if (MovementState != EShipMovementState::HasPathDefined) return;
+
+        TArray<FVector> Waypoints = GetPathWaypoints();
+
+        if (Waypoints.Num() <= 0) return;
+
+        SetPath(Waypoints[0], AdjustedLocation, Distance, Days);
+
+        if (Waypoints.Num() > 1)
+        {
+            for (int32 i = 1; i < Waypoints.Num(); i++)
+            {
+                SetNewWaypoint(Waypoints[i], AdjustedLocation, Distance, Days);
+            }
+        }
+    }
+
+    //Assumes a well formed path in the point count of 4 + 3n
     UFUNCTION()
     TArray<FVector> GetPathWaypoints()
     {
@@ -479,7 +501,7 @@ class UTurnBasedMovementComponent : UActorComponent
 
         int StartPoint = Math::FloorToInt(PathSpline.FindInputKeyClosestToWorldLocation(GetPathStartLocation()));
     
-        //i: 0->3, 1->3, 2->3, 3->3, 4->6, 7->9, etc.
+        //i: 0->3, 1->3, 2->3, 3->6, 4->6, 7->9, etc.
         for (int32 i = (Math::TruncToInt(StartPoint / 3.0) + 1) * 3; i <= PathSpline.NumberOfSplinePoints; i+=3)
         {
             FVector Loc = PathSpline.GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World);
