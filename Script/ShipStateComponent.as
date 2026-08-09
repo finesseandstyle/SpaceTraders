@@ -30,7 +30,7 @@
 
 event void FShipHullDestroyed(UShipStateComponent Ship);
 event void FShipOverheated(UShipStateComponent Ship);
-event void FShipShieldsDepleted(UShipStateComponent Ship);
+event void FShipShieldsDepleted();
 event void FShipSpeedChanged(float NewSpeed);
 event void FShipShieldPointsChanged(float NewShieldPoints, float MaxShieldPoints);
 event void FShipHullPointsChanged(float NewHullPoints, float MaxHullPoints);
@@ -740,12 +740,16 @@ class UShipStateComponent : UActorComponent
     {
         CurrentShieldPoints = Math::Max(0.0, CurrentShieldPoints - ShieldDamage);
         float Delay = GetShipStat(GameplayTags::SpaceShip_Stat_Negative_ShieldRegenDelay);
-        ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_LastShieldHit, FActiveEffect(Delay, 1.0, 1.0)); // resets the regen delay
 
         OnShieldsChanged.Broadcast(CurrentShieldPoints, GetMaxShieldPoints());
 
         if (CurrentShieldPoints <= 0.0)
-            OnShieldsDepleted.Broadcast(this);
+        {
+            OnShieldsDepleted.Broadcast();
+            Delay += 1; //Shield Break
+        }
+        
+        ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_LastShieldHit, FActiveEffect(Delay, 1.0, 1.0)); // resets the regen delay
     }
 
     // 0-100. Feeds GetReliabilitySpeedMultiplier from ShipCombatMath.as
@@ -851,6 +855,7 @@ class UShipStateComponent : UActorComponent
         if (bIsOverheated && CurrentHeat < GetMaxHeat())
             bIsOverheated = false;
 
+        //Shield Regen
         float MaxShields = GetMaxShieldPoints();
         FActiveEffect Shields, LastShieldHit;
         ActiveEffects.Find(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, Shields);
@@ -861,6 +866,17 @@ class UShipStateComponent : UActorComponent
             CurrentShieldPoints = Math::Min(MaxShields, CurrentShieldPoints + Regen);
             OnShieldsChanged.Broadcast(CurrentShieldPoints, MaxShields);
         }
+
+        //HP Regen
+        //Inputting a negative value (for example a self healing weapon) will not overflow capacity
+        UItemHull HullFragment = GetHullFragment();
+        float Repair = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_DroidRepair);
+        if (HullFragment != nullptr && HullFragment.CurrentDurability < HullFragment.GetMaximumDurability() && Repair > 0)
+        {
+            HullFragment.CurrentDurability = Math::Min(HullFragment.CurrentDurability + Repair, HullFragment.GetMaximumDurability());
+            OnHPChanged.Broadcast(HullFragment.CurrentDurability, HullFragment.GetMaximumDurability());
+        }
+
         ProcessActiveEffects();
 
         if (bChangedLoadout)
@@ -1026,6 +1042,9 @@ class UShipStateComponent : UActorComponent
     UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
     UItemDefinition TestRadarDefinition;
 
+    UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
+    UItemDefinition TestDroidDefinition;
+
     UFUNCTION()
     void RunSelfTest()
     {
@@ -1060,6 +1079,9 @@ class UShipStateComponent : UActorComponent
         
         if (TestRadarDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_Radar, InstantiateItem(TestRadarDefinition));
+
+        if (TestRadarDefinition != nullptr)
+            EquipItem(GameplayTags::SpaceShip_Equipment_Droid, InstantiateItem(TestDroidDefinition));
 
         ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, FActiveEffect(-1, 1.0, 1.0));
         FStatAttribute Accuracy = FStatAttribute(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
