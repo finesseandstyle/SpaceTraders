@@ -183,6 +183,7 @@ class UTopDownPlannerComponent : UActorComponent
         if (HoveredObject == PlayerShip)
             return EInteractionResult::OnSelf;
 
+        //Can't do switch on GameplayTags :(
         if (HoveredObject.ObjectType == GameplayTags::GameObject_Ship)
             return EInteractionResult::OnSpaceship;
 
@@ -223,7 +224,7 @@ class UTopDownPlannerComponent : UActorComponent
         }
         else 
         {
-            if (MoveComp.IsMoving())
+            if (MoveComp.IsMoving() || MoveComp.IsStoppedForPickup())
             {
                 if (DestinationLocation.Distance(MoveComp.GetPathEndOfTurnLocation()) >= PathClickingDistance)
                 {
@@ -238,11 +239,11 @@ class UTopDownPlannerComponent : UActorComponent
                     DrawPath(MoveComp, AdjustedLocation, Distance, Days);
                 }
             }
-            else 
+            else if (MoveComp.IsStopped())
             {
                 if (GetOwner().ActorLocation.Distance(DestinationLocation) >= PathClickingDistance)
                 {
-                    if (MoveComp.QueuePathMidTurn(DestinationLocation, AdjustedLocation, Distance, Days))
+                    if (MoveComp.SetPath(DestinationLocation, AdjustedLocation, Distance, Days))
                     {
                         DrawPath(MoveComp, AdjustedLocation, Distance, Days, Duration=1);
                     }

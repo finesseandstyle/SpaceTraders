@@ -40,10 +40,13 @@ event void FOnPickupEnd();
 
 enum EShipMovementState
 {
+    //States when turn is paused
     NoPathDefined,
     HasPathDefined,
+    //States when turn is executing
     Moving,
-    StoppedForPickup
+    StoppedForPickup,
+    Stopped
 };
 
 struct FBeamState
@@ -255,7 +258,7 @@ class UTurnBasedMovementComponent : UActorComponent
 
         if (!HasPathDefined())
         {
-            MovementState = (bImmediatePickup) ? EShipMovementState::StoppedForPickup : EShipMovementState::NoPathDefined;
+            MovementState = (bImmediatePickup) ? EShipMovementState::StoppedForPickup : EShipMovementState::Stopped;
             SetComponentTickEnabled(true);
             return;
         }
@@ -299,8 +302,13 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     void ResumeFromPickup()
     {
-        if (!IsStoppedForPickup() || !HasPathDefined())
+        
+        if (!HasPathDefined())
+        {
+            MovementState = EShipMovementState::Stopped;
+            OnPickupEnd.Broadcast();
             return;
+        }
 
         StoppedTimeEnd = StoppedTimeEnd + CachedGameState.NormalizedTurnProgress - StoppedTimeStart;
 
@@ -322,6 +330,12 @@ class UTurnBasedMovementComponent : UActorComponent
     bool IsStoppedForPickup() const
     {
         return MovementState == EShipMovementState::StoppedForPickup;
+    }
+
+    UFUNCTION(BlueprintPure)
+    bool IsStopped() const
+    {
+        return MovementState == EShipMovementState::Stopped;
     }
 
     UFUNCTION()
@@ -490,6 +504,27 @@ class UTurnBasedMovementComponent : UActorComponent
             {
                 SetNewWaypoint(Waypoints[i], AdjustedLocation, Distance, Days);
             }
+        }
+    }
+
+    UFUNCTION()
+    void UpdateCheckpoints()
+    {
+        float PathLength = PathSpline.SplineLength;
+        
+        StartDistance = 0.0;
+        EndDistance   = Math::Min(CurrentSpeed, PathLength);
+
+        CheckpointDistances.Empty();
+        CheckpointDistances.Add(StartDistance);
+        for (float d = CurrentSpeed; d < PathLength; d += CurrentSpeed)
+        {
+            CheckpointDistances.Add(d);
+        }
+
+        if (PathLength - CheckpointDistances.Last() > 10.0)
+        {
+            CheckpointDistances.Add(PathLength);
         }
     }
 

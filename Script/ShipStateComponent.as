@@ -428,7 +428,7 @@ class UShipStateComponent : UActorComponent
         for (FGameplayTag Tag : AggregatedTags)
             CachedShipStats[Tag] = GameLogic::ApplyModifiers(CachedShipStats[Tag], Tag, GlobalModifiers);
 
-        UpdateSpeed();
+        UpdateSpeedStat();
 
         RecalculateWeaponDamageCache(SlotTags);
     }
@@ -757,7 +757,7 @@ class UShipStateComponent : UActorComponent
     void SetShieldsActive(EShipMovementState State, bool bActive, bool&out ChangedShield)
     {
         float ActiveValue = bActive ? 1.0 : 0.0;
-        if (State == EShipMovementState::Moving)
+        if (State == EShipMovementState::Moving || State == EShipMovementState::StoppedForPickup)
         {
             QueuedActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, FActiveEffect(-1, ActiveValue, 1.0));
             ChangedShield = false;
@@ -807,18 +807,18 @@ class UShipStateComponent : UActorComponent
             AddGlobalModifierStat(Afterburner);
             ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_Afterburner, FActiveEffect(-1, 1.0, 0));
             Print("Afteburners: ON");
-            UpdateSpeed();
+            UpdateSpeedStat();
         }
         else
         {
             RemoveGlobalModifier(Afterburner);
             ActiveEffects.Remove(GameplayTags::SpaceShip_ActiveEffect_Afterburner);
             Print("Afteburners: OFF");
-            UpdateSpeed();
+            UpdateSpeedStat();
         }
     }
 
-    void UpdateSpeed()
+    void UpdateSpeedStat()
     {
         float OldSpeed;
         CachedShipStats.Find(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, OldSpeed);
