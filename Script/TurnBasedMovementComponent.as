@@ -341,6 +341,13 @@ class UTurnBasedMovementComponent : UActorComponent
         return CheckpointDistances.Num() >= 1 && CheckpointDistances.Last() - StartDistance > 1.0;
     }
 
+    
+    UFUNCTION(BlueprintPure)
+    FVector GetPathStartLocation()
+    {
+        return PathSpline.GetLocationAtDistanceAlongSpline(StartDistance, ESplineCoordinateSpace::World);
+    }
+
     //Returns the world location of the current path's location at the end of the turn
     UFUNCTION(BlueprintPure)
     FVector GetPathEndOfTurnLocation()
@@ -469,7 +476,11 @@ class UTurnBasedMovementComponent : UActorComponent
     {
         //Every 3rd point is a waypoint
         TArray<FVector> Waypoints;
-        for (int32 i = 3; i <= PathSpline.NumberOfSplinePoints; i+=3)
+
+        int StartPoint = Math::FloorToInt(PathSpline.FindInputKeyClosestToWorldLocation(GetPathStartLocation()));
+    
+        //i: 0->3, 1->3, 2->3, 3->3, 4->6, 7->9, etc.
+        for (int32 i = (Math::TruncToInt(StartPoint / 3.0) + 1) * 3; i <= PathSpline.NumberOfSplinePoints; i+=3)
         {
             FVector Loc = PathSpline.GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World);
             Waypoints.Add(Loc);

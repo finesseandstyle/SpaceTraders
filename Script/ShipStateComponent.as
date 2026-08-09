@@ -52,20 +52,20 @@ struct FComputedWeaponStats
     UPROPERTY() float Initiative = 10.0;
 }
 
-struct FActiveEffectRule
+struct FActiveEffectRule //AngelScript automatically extends FTableRow so we can fetch their values
 {
     UPROPERTY() FGameplayTag RequiredTag; // Optional, requires a certain stat or tag on the ship to be able to activate
     UPROPERTY() FGameplayTag Name;
     UPROPERTY() float MaxValue = 1;
-    UPROPERTY() float MaxStacks = 5; // A value of 0 means we can't stack
+    UPROPERTY() float MaxStacks = 1; // A value of 0 means we can't stack like for bool values
     UPROPERTY() float MaxDuration = 5;
     UPROPERTY() float DefaultValue = 0.0;
 }
 
 struct FActiveEffect
 {
-    UPROPERTY() float Duration = 1.0; //In Turns, -1 means forever. Every turn we subtract 1 until it's eliminated
-    UPROPERTY() float Value = 0.0; //To use booleans use 0.0 or 1.0
+    UPROPERTY() float Duration = 1.0; //In Turns, -1 means forever. Every turn we subtract 1, when it reaches 0, it's eliminated
+    UPROPERTY() float Value = 0.0; //To use booleans use 0.0 or 1.0. Otherwise -> Stacks * MaxValue
     UPROPERTY() float Stacks = 1.0; //Magnitude of the effect
 
     FActiveEffect(float InDuration, float InValue, float InStacks)
@@ -683,6 +683,7 @@ class UShipStateComponent : UActorComponent
     float GetActiveEffectValue(FGameplayTag ActiveEffect, float DefaultValue = 0.0)
     {
         FActiveEffect temp;
+        //Ignoring Max Value from DT for now, we'll setup a proper way to parse values later
         if (ActiveEffects.Find(ActiveEffect, temp))
         {
             return temp.Value * temp.Stacks;
