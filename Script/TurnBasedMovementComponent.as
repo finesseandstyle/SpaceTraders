@@ -475,7 +475,8 @@ class UTurnBasedMovementComponent : UActorComponent
     {
         CurrentSpeed = MaxSpeedStat * 10; //Max Speed Stat is the ShipState's Stat
 
-        if (MovementState != EShipMovementState::HasPathDefined) return;
+        //This allows using Afterburner mid turn without changing the path
+        if (MovementState != EShipMovementState::HasPathDefined) return; 
 
         TArray<FVector> Waypoints = GetPathWaypoints();
 
