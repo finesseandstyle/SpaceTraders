@@ -898,7 +898,6 @@ class UShipStateComponent : UActorComponent
             float NewDuration = Temp.Duration == -1 ? -1 : Temp.Duration - 1;
             float NewStacks = Math::Max(1.0, Temp.Stacks - 1.0);
             
-            //permanent Active Effects (duration -1) are subtracted but never get cleared automatically
             if (NewDuration == 0.0)
             { 
                 ActiveEffects.Remove(ActiveEffectsKeys[i]); 
