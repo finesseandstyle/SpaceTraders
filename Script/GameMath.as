@@ -8,7 +8,7 @@ namespace GameMath
 
     // Returns an FVector2D where X and Y are either -1, 0, or 1 representing the scroll direction based on screen edges.
     UFUNCTION()
-    FVector2D GetEdgeScrollDirection (FVector2D MousePos, float ScrollPixels, FVector2D ViewportSize)
+    FVector2D GetEdgeScrollDirection(FVector2D MousePos, float ScrollPixels, FVector2D ViewportSize)
     {
         FVector2D ScrollDir = FVector2D::ZeroVector;
 
@@ -51,21 +51,21 @@ namespace GameMath
     UFUNCTION()
     float GetScreenPositionAngle(FVector2D ScreenPos, FVector2D ViewportSize)
     {
-        FVector2D HalfViewport = ViewportSize * 0.5f;
+        FVector2D HalfViewport = ViewportSize * 0.5;
         float AngleDegrees = Math::RadiansToDegrees(Math::Atan2(ScreenPos.X - HalfViewport.X, -(ScreenPos.Y - HalfViewport.Y))) + 360;
 
         return AngleDegrees % 360;
     }
 
     UFUNCTION()
-    FVector ExtendPath (FVector StartLocation, FVector EndLocation, float Extension)
+    FVector ExtendPath(FVector StartLocation, FVector EndLocation, float Extension)
     {
         return (EndLocation - StartLocation).GetSafeNormal() * Extension + StartLocation;
     }
 
     //Returns the mouse location of the playfield ignoring every game object in the way
     UFUNCTION()
-    bool GetPlayfieldLocation (APlayerController PlayerController, FVector&out PlayfieldLocation)
+    bool GetPlayfieldLocation(APlayerController PlayerController, FVector&out PlayfieldLocation)
     {
         FHitResult HitResult;
         PlayerController.GetHitResultUnderCursorByChannel(ETraceTypeQuery::Camera, false, HitResult);
@@ -74,7 +74,7 @@ namespace GameMath
     }
 
     //no ufunction for you cause FCollisionQueryParams can't be exposed
-    bool GetObjectAtCursorLocation (FVector& PlayfieldLocation, FCollisionQueryParams& Params, AGameObject&out HoveredActor)
+    bool GetObjectAtCursorLocation(FVector& PlayfieldLocation, FCollisionQueryParams& Params, AGameObject&out HoveredActor)
     {
         FVector CameraLoc = Gameplay::GetPlayerCameraManager(0).CameraLocation;
         FVector ProjectedLoc = ExtendPath(CameraLoc, PlayfieldLocation, 1000000);
@@ -105,7 +105,7 @@ namespace GameMath
     }
 
     UFUNCTION()
-    void GetTooltipParamsFromWorldLocation (APlayerController PlayerController, FVector WorldLocation, FVector2D&out ScreenPosition, FVector2D&out Offset)
+    void GetTooltipParamsFromWorldLocation(APlayerController PlayerController, FVector WorldLocation, FVector2D&out ScreenPosition, FVector2D&out Offset)
     {
         FVector2D Temp;
         FVector2D ViewportSize = WidgetLayout::GetViewportSize();

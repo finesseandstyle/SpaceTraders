@@ -47,7 +47,6 @@ class ATopDown_GameState : AGameStateBase
         OnGameStateReady.Broadcast();
 
         GetAllActorsOfClass(GameObjects);
-        
         HandleTurn();
     }
 

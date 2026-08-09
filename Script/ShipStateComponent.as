@@ -34,6 +34,7 @@ event void FShipShieldsDepleted();
 event void FShipSpeedChanged(float NewSpeed);
 event void FShipShieldPointsChanged(float NewShieldPoints, float MaxShieldPoints);
 event void FShipHullPointsChanged(float NewHullPoints, float MaxHullPoints);
+event void FShipHeatChanged(float NewHeat, float MaxHeat);
 
 struct FTractorBeamProperties
 {
@@ -83,57 +84,23 @@ struct FActiveEffect
 
 class UShipStateComponent : UActorComponent
 {
-    // Every slot this ship currently has, keyed by its gameplay tag
-    // (SpaceShip_Equipment_Weapon_1, SpaceShip_Equipment_ShieldGenerator, ...).
-    // GameplayTags::SpaceShip_Equipment_Hull is populated the first time
-    // SwapItem() is called and stays populated forever after - see SwapItem.
-    UPROPERTY() TMap<FGameplayTag, FGameItem> EquipmentSlots;
     UPROPERTY() FGameplayTag Faction;
-
-    // General cargo hold: trade goods, spare unequipped gear, etc.
+    UPROPERTY() TMap<FGameplayTag, FGameItem> EquipmentSlots; //Hull, Engine, Droid, Radar, Artifacts, Weapons, etc.
     UPROPERTY() TArray<FGameItem> Inventory;
-
-    // ------------------------------------------------------------------
-    // Ship-wide stat cache (Level 2 of the two-tier smart recalculation -
-    // see RecalculateShipStats() below for Level 1).
-    // ------------------------------------------------------------------
-
-    // Designer-set baselines not tied to any single item - Core Character
-    // Stats like Accuracy/Evasion typically start here rather than at 0.
-    UPROPERTY() TArray<FStatAttribute> CharacterStats;
-
-    // Ship-wide modifiers that don't belong to any one item: StatSource_Acrine
-    // (global race bonuses) and StatSource_ActiveEffect (stimulants etc).
-    UPROPERTY() TArray<FStatModifier> GlobalModifiers;
-
-    // Transient - not saved, rebuilt from the above whenever it's stale.
-    private TMap<FGameplayTag, float> CachedShipStats;
-
-    // Transient, keyed by weapon slot tag - each weapon's MaxDamage after
-    // DamageGlobal/DamageType bonuses are folded in. Kept separate from
-    // CachedShipStats since these bonuses resolve per-weapon, not ship-wide -
-    // see the file header and RecalculateWeaponDamageCache().
-    private TMap<FGameplayTag, FComputedWeaponStats> CachedWeaponStats;
-
-    //Active effects: Shields Activated, Afterburner Activated, DoT, Ship Slowdown, ArmorNullification
-    UPROPERTY() TMap<FGameplayTag, FActiveEffect> ActiveEffects;
-
+    UPROPERTY() TArray<FStatAttribute> CharacterStats; //Accuracy, Evasion, Negotiation, Leadership, Engineering
+    UPROPERTY() TArray<FStatModifier> GlobalModifiers; //+5 kinetic damage, +20% speed, -10% mass, +15 droid repair, +1 acc
+    private TMap<FGameplayTag, float> CachedShipStats; //Final Stats for ship wide stats, recalculated only when needed.
+    private TMap<FGameplayTag, FComputedWeaponStats> CachedWeaponStats; //Calculated Stats for each individual weapon slot
+    UPROPERTY() TMap<FGameplayTag, FActiveEffect> ActiveEffects; 
+    UPROPERTY() TMap<FGameplayTag, FActiveEffect> QueuedActiveEffects; 
     private bool bStatsDirty = true;
 
     // ------------------------------------------------------------------
     // Turn-mutable combat state
     // ------------------------------------------------------------------
-
-    // Hull Points are NOT duplicated here - they live on the equipped hull's
-    // CurrentDurability/MaxDurability. See GetCurrentHullPoints/GetMaxHullPoints.
-
+    //Swapping hulls will reset your HP to the item's durability, so it doesn't need to be here
     UPROPERTY() float CurrentShieldPoints = 0.0;
-    //UPROPERTY() bool bShieldsActive = true; // toggled once per turn by the player, like a stance
-    //UPROPERTY() int32 TurnsSinceShieldDamage = 0;
-    //UPROPERTY() int32 ShieldRegenDelayTurns = 2; // n turns with no shield damage before regen resumes
-    //UPROPERTY() float ShieldRegenPercentPerTurn = 0.1; // fraction of max regenerated per turn once active
     UPROPERTY() float CurrentHeat = 0.0;
-    UPROPERTY() bool bIsOverheated = false;
 
     UPROPERTY() FShipHullDestroyed OnHullDestroyed;
     UPROPERTY() FShipOverheated OnOverheated;
@@ -141,6 +108,7 @@ class UShipStateComponent : UActorComponent
     UPROPERTY() FShipSpeedChanged OnSpeedChanged;
     UPROPERTY() FShipShieldPointsChanged OnShieldsChanged;
     UPROPERTY() FShipHullPointsChanged OnHPChanged;
+    UPROPERTY() FShipHeatChanged OnHeatChanged;
 
     private bool bChangedLoadout = false;
 
@@ -699,6 +667,24 @@ class UShipStateComponent : UActorComponent
         return DefaultValue;
     }
 
+    UFUNCTION()
+    float GetQueuedActiveEffectValue(FGameplayTag ActiveEffect, float DefaultValue = 0.0)
+    {
+        FActiveEffect temp;
+        //Ignoring Max Value from DT for now, we'll setup a proper way to parse values later
+        if (!ActiveEffects.Contains(ActiveEffect))
+        {
+            return GetActiveEffectValue(ActiveEffect, DefaultValue);
+        }
+
+        if (QueuedActiveEffects.Find(ActiveEffect, temp))
+        {
+            return temp.Value * temp.Stacks;
+        }
+
+        return DefaultValue;
+    }
+
     UFUNCTION(BlueprintPure)
     float GetCurrentHullPoints()
     {
@@ -768,11 +754,19 @@ class UShipStateComponent : UActorComponent
     }
 
     UFUNCTION()
-    void SetShieldsActive(bool bActive)
+    void SetShieldsActive(EShipMovementState State, bool bActive, bool&out ChangedShield)
     {
         float ActiveValue = bActive ? 1.0 : 0.0;
+        if (State == EShipMovementState::Moving)
+        {
+            QueuedActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, FActiveEffect(-1, ActiveValue, 1.0));
+            ChangedShield = false;
+            //Print(f"Queued shield change");
+            return;
+            
+        }
         ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, FActiveEffect(-1, ActiveValue, 1.0));
-        //Print(f"Shields: {bActive}");
+        ChangedShield = true;
     }
 
     UFUNCTION(BlueprintPure)
@@ -789,11 +783,12 @@ class UShipStateComponent : UActorComponent
         if (MaxHeat > 0.0 && CurrentHeat >= MaxHeat)
         {
             CurrentHeat = MaxHeat;
-            if (!bIsOverheated)
+            if (!ActiveEffects.Contains(GameplayTags::SpaceShip_ActiveEffect_Overload))
             {
-                bIsOverheated = true;
+                ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_Overload, FActiveEffect(3, 1.0, 1.0));
                 OnOverheated.Broadcast(this);
             }
+            OnHeatChanged.Broadcast(CurrentHeat, MaxHeat);
         }
     }
 
@@ -803,11 +798,6 @@ class UShipStateComponent : UActorComponent
         FStatModifier Afterburner = FStatModifier(GameplayTags::StatSource_ActiveEffect,
             GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative, 1.0);
         //1.0 -> +100% -> 2x increase
-        //Bad way to do this cause then we need to track whether we switch equipment after activating this
-        //TODO: On turn update we iterate active effects (like Afterburner) then we directly apply durability damage instead
-        //FStatModifier Degradation = FStatModifier(GameplayTags::StatSource_ActiveEffect, GameplayTags::SpaceShip_Stat_Negative_DurabilityDegradation, EStatType::Multiplicative, 50.0);
-
-        //TODO: fetch from Active Effect Rule Data table
 
         //Just a usage example of checking active effects
         bool bAfterburnerIsActive = ActiveEffects.Contains(GameplayTags::SpaceShip_ActiveEffect_Afterburner);
@@ -816,15 +806,14 @@ class UShipStateComponent : UActorComponent
         {
             AddGlobalModifierStat(Afterburner);
             ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_Afterburner, FActiveEffect(-1, 1.0, 0));
-            //ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_EquipmentDegradation, FActiveEffect(-1, 1.0, 0, GameplayTags::SpaceShip_Equipment_Hull));
-            Print("Added Afteburners");
+            Print("Afteburners: ON");
             UpdateSpeed();
         }
         else
         {
             RemoveGlobalModifier(Afterburner);
             ActiveEffects.Remove(GameplayTags::SpaceShip_ActiveEffect_Afterburner);
-            Print("Removed Afteburners");
+            Print("Afteburners: OFF");
             UpdateSpeed();
         }
     }
@@ -850,10 +839,12 @@ class UShipStateComponent : UActorComponent
     {
         RecalculateShipStatsIfDirty();
 
-        float Dissipation = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatDissipation, 0.0);
-        CurrentHeat = Math::Max(0.0, CurrentHeat - Dissipation);
-        if (bIsOverheated && CurrentHeat < GetMaxHeat())
-            bIsOverheated = false;
+        //Heat Dissipation
+        if (!ActiveEffects.Contains(GameplayTags::SpaceShip_ActiveEffect_Overload))
+        {
+            float Dissipation = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatDissipation, 0.0);
+            CurrentHeat = Math::Max(0.0, CurrentHeat - Dissipation);
+        }
 
         //Shield Regen
         float MaxShields = GetMaxShieldPoints();
@@ -877,6 +868,7 @@ class UShipStateComponent : UActorComponent
             OnHPChanged.Broadcast(HullFragment.CurrentDurability, HullFragment.GetMaximumDurability());
         }
 
+        ProcessQueuedActiveEffects();
         ProcessActiveEffects();
 
         if (bChangedLoadout)
@@ -888,6 +880,7 @@ class UShipStateComponent : UActorComponent
     UFUNCTION()
     void ProcessActiveEffects()
     {
+        ProcessQueuedActiveEffects();
         TArray<FGameplayTag> ActiveEffectsKeys;
         ActiveEffects.GetKeys(ActiveEffectsKeys);
         TArray<FActiveEffect> ActiveEffectsValues;
@@ -895,7 +888,7 @@ class UShipStateComponent : UActorComponent
         for (int32 i = 0; i < ActiveEffectsValues.Num(); i++)
         {
             FActiveEffect Temp = ActiveEffectsValues[i];
-            float NewDuration = Temp.Duration == -1 ? -1 : Temp.Duration - 1;
+            float NewDuration = Temp.Duration <= -1 ? -1 : Temp.Duration - 1;
             float NewStacks = Math::Max(1.0, Temp.Stacks - 1.0);
             
             if (NewDuration == 0.0)
@@ -910,22 +903,38 @@ class UShipStateComponent : UActorComponent
         }
     }
 
+    UFUNCTION()
+    void ProcessQueuedActiveEffects()
+    {
+        TArray<FGameplayTag> ActiveEffectsKeys;
+        QueuedActiveEffects.GetKeys(ActiveEffectsKeys);
+        TArray<FActiveEffect> ActiveEffectsValues;
+        QueuedActiveEffects.GetValues(ActiveEffectsValues);
+
+        for (int32 i = 0; i < ActiveEffectsValues.Num(); i++)
+        {
+            FActiveEffect Temp = ActiveEffectsValues[i];
+            Print(f"{ActiveEffectsKeys[i]} - {ActiveEffectsValues[i].Value}");
+            ActiveEffects.Add(ActiveEffectsKeys[i], Temp);
+        }
+        QueuedActiveEffects.Empty();
+    }
+
 
     UFUNCTION()
-    FDamageCalculationOutput ApplySelfDamage(float UnmitigatedDamage, float ShieldBypass, FGameplayTag DamageType, float GlobalDamageModifier = 1.0, float ArmorNullification  = 1.0)
+    FDamageCalculationOutput ApplySelfDamage(float UnmitigatedDamage, float ShieldBypass, FGameplayTag DamageType, float GlobalDamageModifier = 1.0)
     {
-        FActiveEffect Shields;
-        ActiveEffects.Find(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, Shields);
+        float ArmorNullification = GetActiveEffectValue(GameplayTags::SpaceShip_ActiveEffect_ArmorNullification, 1.0);
         FDamageCalculationInput Input;
         Input.SourceUnmitigatedDamage = UnmitigatedDamage;
         Input.SourceShieldBypass = ShieldBypass;
         Input.SourceGlobalDamageModifier = GlobalDamageModifier;
         Input.TargetCurrentShields = CurrentShieldPoints;
-        Input.bTargetHasShieldsActive = Shields.Value == 1.0;
+        Input.bTargetHasShieldsActive = GetActiveEffectValue(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated) == 1.0;
         Input.TargetShieldDamageBlock = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShieldGeneratorDamageBlock, 0.0);
         Input.TargetShipDamageResistance = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShipDamageResistance, 1.0) * ArmorNullification;
         Input.TargetTypeSpecificResistance = GetResistanceForDamageType(DamageType);
-        Input.bTargetIsInvulnerable = false;
+        Input.bTargetIsInvulnerable = GetActiveEffectValue(GameplayTags::SpaceShip_ActiveEffect_Invulnerability) == 1.0;
 
         FDamageCalculationOutput Output = GameLogic::CalculateDamage(Input);
 
@@ -969,8 +978,6 @@ class UShipStateComponent : UActorComponent
         float Accuracy = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
         float Evasion = Target.GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Evasion, 0.0);
 
-        float ArmorNullification = Target.GetShipStat(GameplayTags::SpaceShip_Stat_Negative_ArmorNullification, 1.0);
-
         // Per-weapon: this specific weapon's own MaxDamage with DamageGlobal
         // and its own DamageType's bonus already folded in - see
         // RecalculateWeaponDamageCache() and the file header for why this
@@ -985,7 +992,7 @@ class UShipStateComponent : UActorComponent
         // of time.
         float GlobalDamageModifier = 1.0 + GetShipStat(GetFactionTargetTag(Target.Faction), 0.0);
 
-        FDamageCalculationOutput Output = Target.ApplySelfDamage(RolledDamage, Weapon.ShieldBypass, Weapon.DamageType, GlobalDamageModifier, ArmorNullification);
+        FDamageCalculationOutput Output = Target.ApplySelfDamage(RolledDamage, Weapon.ShieldBypass, Weapon.DamageType, GlobalDamageModifier);
 
         AddHeat(Weapon.HeatUse); // firing costs the shooter heat too
 
