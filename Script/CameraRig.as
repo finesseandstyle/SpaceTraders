@@ -256,7 +256,7 @@ class ACameraRig : APawn
     UFUNCTION()
     void SetNewObjectToFollow(AActor NewTarget)
     {
-        if (NewTarget == nullptr)
+        if (NewTarget == nullptr || (NewTarget == TargetToFollow && bIsFollowing))
         {
             return;
         }
