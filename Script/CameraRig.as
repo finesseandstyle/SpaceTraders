@@ -163,7 +163,7 @@ class ACameraRig : APawn
                 SwayVector = ShipRight * NewSway * ArrivalScale;
 
                 FVector DesiredTargetOffset = LookAheadVector + SwayVector;
-                SpringArm.TargetOffset = Math::VInterpTo(SpringArm.TargetOffset, DesiredTargetOffset, DeltaSeconds, SwayInterpSpeed);
+                SpringArm.TargetOffset = Math::VInterpTo(SpringArm.TargetOffset, DesiredTargetOffset, DeltaSeconds, SwayInterpSpeed + (1 - ArrivalScale) * 10);
             }
         }
 
