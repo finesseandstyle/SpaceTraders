@@ -1,14 +1,9 @@
 class ACameraRig : APawn
 {
     // --- Components ---
-    UPROPERTY(DefaultComponent, RootComponent)
-    USceneComponent RigRoot;
-
-    UPROPERTY(DefaultComponent, Attach = RigRoot)
-    USpringArmComponent SpringArm;
-
-    UPROPERTY(DefaultComponent, Attach = SpringArm)
-    UCameraComponent Camera;
+    UPROPERTY(DefaultComponent, RootComponent)      USceneComponent RigRoot;
+    UPROPERTY(DefaultComponent, Attach = RigRoot)   USpringArmComponent SpringArm;
+    UPROPERTY(DefaultComponent, Attach = SpringArm) UCameraComponent Camera;
 
     // --- Config ---
     UPROPERTY(Category = "Camera Config") float ScrollSpeed = 2;
@@ -25,6 +20,7 @@ class ACameraRig : APawn
     UPROPERTY(Category = "Camera Config") float SmoothZoomSpeed = 2;
     UPROPERTY(Category = "Camera Config") bool bSmoothZoom = true;
     UPROPERTY(Category = "Camera Config") float RecenterDuration = 1;
+    UPROPERTY(Category = "Camera Config") float ArrivalDampeningDistance = 5000.0;
 
     // --- State ---
     UPROPERTY(Category = "Camera State") bool bIsFollowing = false;
@@ -36,7 +32,7 @@ class ACameraRig : APawn
     UPROPERTY(Category = "Camera State") FVector TransitionStartLocation;
     UPROPERTY(Category = "Camera State") float TransitionElapsed = 0.0;
     UPROPERTY(Category = "Camera State") bool bIsTransitioningOffsetToZero = false;
-
+    UPROPERTY(Category = "Camera State") float RemainingPathDistance = -1.0;
 
     private float OldSpringArmLength, NewSpringArmLength;
     private FVector OldZoomLoc, NewZoomLoc, TargetPlayfieldLocation;
@@ -58,20 +54,23 @@ class ACameraRig : APawn
         SetTickGroup(ETickingGroup::TG_PostPhysics); //no stuttering
     }
 
+    UFUNCTION()
+    void SetRemainingPathDistance(float Distance)
+    {
+        RemainingPathDistance = Distance;
+    }
+
     //Has to be run on the PC with TickGroup = Post Physics
     UFUNCTION()
     void SmoothZoom(float DeltaSeconds)
     {
         if (bSmoothZoom && bIsZoomAnimating)
         {                
-            // 1. Capture the length BEFORE this frame's interpolation step
             float OldLength = SpringArm.TargetArmLength;
             
-            // 2. Advance the spring arm length interpolation
             float NewLength = Math::FInterpTo(OldLength, NewSpringArmLength, DeltaSeconds, 10);
             SpringArm.TargetArmLength = NewLength;
 
-            // 3. Apply frame-by-frame cursor zoom scaling based on the actual delta change
             if (bApplyZoomToCursor && !Math::IsNearlyZero(OldLength))
             {
                 float Ratio = NewLength / OldLength;
@@ -82,8 +81,6 @@ class ACameraRig : APawn
                 NewLoc.Z = ZLevel; 
                 
                 SetActorLocation(NewLoc);
-                //Print(f"Old Length: {OldLength}\nNew Length:{NewLength}\nRatio:{Ratio}\nCurrentLoc: {CurrentLoc}\n", 0);
-                //Print(f"Target Loc: {TargetPlayfieldLocation}", 0);
             }
             
             // 4. Reset animation tracking when we get within 1 unit of the target
@@ -141,35 +138,33 @@ class ACameraRig : APawn
             // side-to-side sway
             if (!bIsTurnPaused)
             {
+                float ArrivalScale = Math::Clamp(RemainingPathDistance / ArrivalDampeningDistance, 0.0, 1.0);
+
                 FVector ShipForward = TargetToFollow.GetActorForwardVector();
                 ShipForward.Z = 0;
                 ShipForward.Normalize();
 
-                // 💡 Convert the ship's world heading into the Camera Rig's local view space
                 FVector LocalHeading = GetActorTransform().InverseTransformVector(ShipForward);
                 LocalHeading.Normalize();
 
-                // Establish our 16:9 Screen Dimension Coefficients
+                // The look ahead depends on the size of the screen. A wide screen needs to adjust more to the sides
                 // TODO: set up aspect ratio dynamically when windows changes.
                 float HorizontalScale = 1.77;
                 float VerticalScale = 1.00;
 
-                // 💡 Calculate a dynamic modifier based on the camera view plane.
-                // LocalHeading.Y represents Left/Right movement across your monitor screen.
-                // LocalHeading.X represents Up/Down movement across your monitor screen.
                 float AspectRatioMultiplier = Math::Lerp(VerticalScale, HorizontalScale, Math::Abs(LocalHeading.Y));
                 
-                // Push the look-ahead out, incorporating our dynamic aspect ratio modifier
-                LookAheadVector = ShipForward * LookAhead * AspectRatioMultiplier;
+                LookAheadVector = ShipForward * LookAhead * AspectRatioMultiplier * ArrivalScale;
 
                 float TimeScale = Gameplay::GetRealTimeSeconds();
                 float NewSway = Math::Sin(TimeScale * SwayFrequency) * SwayDistance;
                 
                 FVector ShipRight = TargetToFollow.GetActorRightVector();
-                SwayVector = ShipRight * NewSway;
+                SwayVector = ShipRight * NewSway * ArrivalScale;
+
+                FVector DesiredTargetOffset = LookAheadVector + SwayVector;
+                SpringArm.TargetOffset = Math::VInterpTo(SpringArm.TargetOffset, DesiredTargetOffset, DeltaSeconds, SwayInterpSpeed);
             }
-            FVector DesiredTargetOffset = LookAheadVector + SwayVector;
-            SpringArm.TargetOffset = Math::VInterpTo(SpringArm.TargetOffset, DesiredTargetOffset, DeltaSeconds, SwayInterpSpeed);
         }
 
         // Without this, panning after following is jarring
@@ -177,7 +172,6 @@ class ACameraRig : APawn
         {
             SpringArm.TargetOffset = Math::VInterpTo(SpringArm.TargetOffset, FVector::ZeroVector, DeltaSeconds, 10);
             SpringArm.SocketOffset = Math::VInterpTo(SpringArm.SocketOffset, FVector::ZeroVector, DeltaSeconds, 10);
-            //Print(f"{SpringArm.TargetOffset} - {SpringArm.SocketOffset}", 0);
 
             if (SpringArm.TargetOffset.IsNearlyZero() && SpringArm.SocketOffset.IsNearlyZero())
             {
@@ -227,7 +221,7 @@ class ACameraRig : APawn
         NewSpringArmLength = Math::Clamp(NewSpringArmLength, MinZoom, MaxZoom);
         
         // Cache cursor data for the active zoom lifecycle
-        if (!bIsFollowing && bZoomToCursor)
+        if ((bIsTurnPaused && bZoomToCursor) || (!bIsFollowing && bZoomToCursor))
         {
             SetFreeCamera();
             TargetPlayfieldLocation = PlayfieldLocation;

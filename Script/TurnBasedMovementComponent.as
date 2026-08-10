@@ -376,6 +376,13 @@ class UTurnBasedMovementComponent : UActorComponent
         return Math::RoundToInt(ScaledDistance);
     }
 
+    UFUNCTION(BlueprintPure)
+    float GetRemainingPathDistance()
+    {
+        //TODO: On tick we already calculate the current distance, maybe reuse it here?
+        return PathSpline.SplineLength - PathSpline.GetDistanceAlongSplineAtLocation(GetOwner().ActorLocation, ESplineCoordinateSpace::World);
+    }
+
     // ==================================================================
     // Path building
     // ==================================================================
