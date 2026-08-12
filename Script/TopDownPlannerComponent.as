@@ -343,4 +343,42 @@ class UTopDownPlannerComponent : UActorComponent
         MoveComp.SetRotatedPath(ClickStartLocation, DragEndLocation, Distance, Days, AdjustedLocation);
         DrawPath(MoveComp, AdjustedLocation, Distance, Days);
     }
+
+    //purely for testing purposes, for firing ships
+    UFUNCTION()
+    AGameObject GetNearestSpaceShip(AGameObject ExcludeObject)
+    {
+        // Retrieve the active GameState cast to your custom state
+        ATopDown_GameState GameState = Cast<ATopDown_GameState>(Gameplay::GetGameState());
+        if (GameState == nullptr)
+            return nullptr;
+
+        // Get the owner or origin location for distance calculations
+        // (Assuming this function is inside an Actor/Component; fallback to zero vector if needed)
+        FVector SearchOrigin = GetOwner().ActorLocation;
+
+        AGameObject NearestShip = nullptr;
+        float MinDistanceSq = MAX_flt;
+
+        // Iterate through all tracked game objects in the GameState
+        for (AGameObject Obj : GameState.GameObjects)
+        {
+            if (Obj == nullptr || Obj == ExcludeObject)
+                continue;
+
+            // Verify object has the Ship tag
+            if (Obj.ObjectType.MatchesTagExact(GameplayTags::GameObject_Ship))
+            {
+                // Use GetSquaredDistanceTo for performance (avoids square root overhead)
+                float DistSq = SearchOrigin.DistSquared(Obj.GetActorLocation());
+                if (DistSq < MinDistanceSq)
+                {
+                    MinDistanceSq = DistSq;
+                    NearestShip = Obj;
+                }
+            }
+        }
+
+        return NearestShip;
+    }
 };
