@@ -4,6 +4,7 @@ struct FPendingVfxProjectile
     AGameObject TargetObject;
     
     FVector CurrentPosition;
+    FVector OffsetPosition; //Maybe change this to the ship's size so that we can randomize our shots
     
     // Impact VFX to spawn on hit
     UNiagaraSystem ImpactVfx;
@@ -21,7 +22,8 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         UNiagaraSystem TracerVfx, 
         UNiagaraSystem ImpactVfx,
         FVector MuzzleLocation, 
-        AGameObject GameObject)
+        AGameObject GameObject,
+        FVector OffsetPosition)
     {
         if (GameObject == nullptr || TracerVfx == nullptr)
             return;
@@ -30,6 +32,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         NewShot.CurrentPosition = MuzzleLocation;
         NewShot.TargetObject = GameObject;
         NewShot.ImpactVfx = ImpactVfx;
+        NewShot.OffsetPosition = OffsetPosition; 
 
         FVector InitialTargetPos = GameObject.ActorLocation;
         FVector InitialDir = (InitialTargetPos - MuzzleLocation).GetSafeNormal();
@@ -65,7 +68,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
             FPendingVfxProjectile& Shot = ActiveShots[i];
 
             const float FullStep = DefaultProjectileSpeed * DeltaTime;
-            const FVector TargetLocation = Shot.TargetObject.ActorLocation;
+            const FVector TargetLocation = Shot.TargetObject.ActorLocation + Shot.OffsetPosition;
 
             // Compute vector and distance to target BEFORE updating position
             const FVector ToTarget = TargetLocation - Shot.CurrentPosition;

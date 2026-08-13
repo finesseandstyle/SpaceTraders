@@ -32,8 +32,8 @@ event void FShipHullDestroyed(UShipStateComponent Ship);
 event void FShipOverheated(UShipStateComponent Ship);
 event void FShipShieldsDepleted();
 event void FShipSpeedChanged(float NewSpeed);
-event void FShipShieldPointsChanged(float NewShieldPoints, float MaxShieldPoints);
-event void FShipHullPointsChanged(float NewHullPoints, float MaxHullPoints);
+event void FShipShieldPointsChanged(float NewShieldPoints, float MaxShieldPoints, float Delta);
+event void FShipHullPointsChanged(float NewHullPoints, float MaxHullPoints, float Delta);
 event void FShipHeatChanged(float NewHeat, float MaxHeat);
 
 struct FTractorBeamProperties
@@ -672,7 +672,7 @@ class UShipStateComponent : UActorComponent
     {
         FActiveEffect temp;
         //Ignoring Max Value from DT for now, we'll setup a proper way to parse values later
-        if (!ActiveEffects.Contains(ActiveEffect))
+        if (!QueuedActiveEffects.Contains(ActiveEffect))
         {
             return GetActiveEffectValue(ActiveEffect, DefaultValue);
         }
@@ -715,7 +715,7 @@ class UShipStateComponent : UActorComponent
         //Inputting a negative value (for example a self healing weapon) will not overflow capacity
         HullFragment.CurrentDurability = Math::Min(HullFragment.CurrentDurability - HullDamage, HullFragment.GetMaximumDurability());
 
-        OnHPChanged.Broadcast(HullFragment.CurrentDurability, HullFragment.GetMaximumDurability());
+        OnHPChanged.Broadcast(HullFragment.CurrentDurability, HullFragment.GetMaximumDurability(), -HullDamage);
 
         if (HullFragment.CurrentDurability <= 0.0)
             OnHullDestroyed.Broadcast(this);
@@ -727,7 +727,7 @@ class UShipStateComponent : UActorComponent
         CurrentShieldPoints = Math::Max(0.0, CurrentShieldPoints - ShieldDamage);
         float Delay = GetShipStat(GameplayTags::SpaceShip_Stat_Negative_ShieldRegenDelay);
 
-        OnShieldsChanged.Broadcast(CurrentShieldPoints, GetMaxShieldPoints());
+        OnShieldsChanged.Broadcast(CurrentShieldPoints, GetMaxShieldPoints(), -ShieldDamage);
 
         if (CurrentShieldPoints <= 0.0)
         {
@@ -754,19 +754,21 @@ class UShipStateComponent : UActorComponent
     }
 
     UFUNCTION()
-    void SetShieldsActive(EShipMovementState State, bool bActive, bool&out ChangedShield)
+    bool SetShieldsActive(EShipMovementState State, float ActiveValue, bool&out ChangedShield)
     {
-        float ActiveValue = bActive ? 1.0 : 0.0;
-        if (State == EShipMovementState::Moving || State == EShipMovementState::StoppedForPickup)
+        FActiveEffect Shields;
+        ActiveEffects.Find(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, Shields);
+        // Replace with Turn Paused / Turn Executing
+        if (State == EShipMovementState::Moving || State == EShipMovementState::StoppedForPickup || State == EShipMovementState::Stopped)
         {
             QueuedActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, FActiveEffect(-1, ActiveValue, 1.0));
             ChangedShield = false;
-            //Print(f"Queued shield change");
-            return;
-            
+            Print(f"Queued shield change");
+            return ActiveValue != Shields.Value;
         }
         ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, FActiveEffect(-1, ActiveValue, 1.0));
-        ChangedShield = true;
+        ChangedShield = ActiveValue != Shields.Value;
+        return ActiveValue == 1.0;
     }
 
     UFUNCTION(BlueprintPure)
@@ -855,7 +857,7 @@ class UShipStateComponent : UActorComponent
         {
             float Regen = MaxShields * GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShieldRegenPercentPerTurn);
             CurrentShieldPoints = Math::Min(MaxShields, CurrentShieldPoints + Regen);
-            OnShieldsChanged.Broadcast(CurrentShieldPoints, MaxShields);
+            OnShieldsChanged.Broadcast(CurrentShieldPoints, MaxShields, Regen);
         }
 
         //HP Regen
@@ -865,10 +867,10 @@ class UShipStateComponent : UActorComponent
         if (HullFragment != nullptr && HullFragment.CurrentDurability < HullFragment.GetMaximumDurability() && Repair > 0)
         {
             HullFragment.CurrentDurability = Math::Min(HullFragment.CurrentDurability + Repair, HullFragment.GetMaximumDurability());
-            OnHPChanged.Broadcast(HullFragment.CurrentDurability, HullFragment.GetMaximumDurability());
+            OnHPChanged.Broadcast(HullFragment.CurrentDurability, HullFragment.GetMaximumDurability(), Repair);
         }
 
-        ProcessQueuedActiveEffects();
+        //ProcessQueuedActiveEffects();
         ProcessActiveEffects();
 
         if (bChangedLoadout)
@@ -899,24 +901,25 @@ class UShipStateComponent : UActorComponent
             }
 
             ActiveEffects.Add(ActiveEffectsKeys[i], FActiveEffect(NewDuration, Temp.Value, NewStacks));
-            Print(f"{ActiveEffectsKeys[i]}: Duration={NewDuration}, Value={Temp.Value}, Stacks={Temp.Stacks}");
+            //Print(f"{ActiveEffectsKeys[i]}: Duration={NewDuration}, Value={Temp.Value}, Stacks={Temp.Stacks}");
         }
     }
 
+    //How to use Queued Active Effects. If we want to use toggleable abilities mid turn, we want to take the example of
+    //SetShieldsActive(). We add it to the queued active effects and process them at TurnUpdate and TurnPause
+    //TurnUpdate:
+    //  1. Temporarily Set our Movement State to a Paused State 
+    //  2. For each Queued Active Effect -> Use the respective function
+    //  3. Advance Turn
+    //  4. Revert back to our previous Movement State 
+    //  5. Path Stuff then Clear All Queued active effects
+    // TurnPause:
+    //  0. All other stuff
+    //  1. For each Queued Active Effect -> Use the respective function
+    //  2. Path Stuff then Clear All Queued active effects
     UFUNCTION()
     void ProcessQueuedActiveEffects()
     {
-        TArray<FGameplayTag> ActiveEffectsKeys;
-        QueuedActiveEffects.GetKeys(ActiveEffectsKeys);
-        TArray<FActiveEffect> ActiveEffectsValues;
-        QueuedActiveEffects.GetValues(ActiveEffectsValues);
-
-        for (int32 i = 0; i < ActiveEffectsValues.Num(); i++)
-        {
-            FActiveEffect Temp = ActiveEffectsValues[i];
-            Print(f"{ActiveEffectsKeys[i]} - {ActiveEffectsValues[i].Value}");
-            ActiveEffects.Add(ActiveEffectsKeys[i], Temp);
-        }
         QueuedActiveEffects.Empty();
     }
 
