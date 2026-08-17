@@ -117,4 +117,85 @@ namespace GameMath
         ScreenPosition = FVector2D(X, Y);
         Offset = GetToolTipOffset(Math::RoundToInt(X / ViewportSize.X * 3.0) + Math::RoundToInt(Y / ViewportSize.Y * 3.0) * 3);
     }
+
+    //Maybe create an alternative with 
+    UFUNCTION()
+    AGameObject GetNearestGameObject_Array(AGameObject SelfObject, TArray<AGameObject> Objects, float Radius, FGameplayTag Type=GameplayTags::GameObject_Ship)
+    {
+        if (SelfObject == nullptr || Objects.Num() == 0)
+            return nullptr;
+
+        AGameObject NearestObject = nullptr;
+        float RadiusSq = Radius * Radius;
+        float ClosestDistanceSq = RadiusSq;
+        FVector SelfLocation = SelfObject.GetActorLocation();
+
+        for (AGameObject Obj : Objects)
+        {
+            if (Obj == nullptr || Obj == SelfObject || !Obj.ObjectType.MatchesTagExact(Type))
+                continue;
+
+            //We always use 2D distance because objects can be in different Z Planes
+            float DistSq = SelfLocation.DistSquared2D(Obj.GetActorLocation());
+
+            if (DistSq <= ClosestDistanceSq)
+            {
+                ClosestDistanceSq = DistSq;
+                NearestObject = Obj;
+            }
+        }
+
+        return NearestObject;
+    }
+
+    UFUNCTION()
+    AGameObject GetNearestGameObject_Trace(AGameObject Self, float Radius)
+    {
+        if (Self == nullptr || Radius <= 0.0f)
+            return nullptr;
+
+        FVector SelfLocation = Self.GetActorLocation();
+
+        TArray<FHitResult> HitResults;
+        TArray<AActor> ActorsToIgnore;
+        ActorsToIgnore.Add(Self);
+
+        bool bHit = System::SphereTraceMulti(
+            SelfLocation,
+            SelfLocation,
+            Radius,
+            ETraceTypeQuery::TraceTypeQuery1, // TODO: Use A trace query only for playfield objects
+            false,
+            ActorsToIgnore,
+            EDrawDebugTrace::None,
+            HitResults,
+            true
+        );
+
+        if (!bHit)
+            return nullptr;
+
+        AGameObject NearestObject = nullptr;
+        float RadiusSq = Radius * Radius;
+        float ClosestDistanceSq = RadiusSq;
+
+        for (const FHitResult& Hit : HitResults)
+        {
+            AGameObject FoundObject = Cast<AGameObject>(Hit.GetActor());
+
+            // Skip nulls, non-matching classes, or Self
+            if (FoundObject == nullptr || FoundObject == Self)
+                continue;
+
+            float DistSq = SelfLocation.DistSquared2D(FoundObject.GetActorLocation());
+
+            if (DistSq < ClosestDistanceSq)
+            {
+                ClosestDistanceSq = DistSq;
+                NearestObject = FoundObject;
+            }
+        }
+
+        return NearestObject;
+    }
 }

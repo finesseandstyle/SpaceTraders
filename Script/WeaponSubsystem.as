@@ -11,11 +11,27 @@ struct FPendingVfxProjectile
     //TODO: vfx id system -> get vfx from id from a DT or smth -> spawn impact vfx, no need to track it here
 }
 
+struct FPendingVfxBeam
+{
+    UNiagaraComponent LaserTemplateNS;
+    UNiagaraComponent ImpactTemplateNS;
+    USceneComponent SourceComponent;
+    USceneComponent TargetComponent;
+
+    FVector OffsetPosition;
+
+    float Duration = 0.0;
+    float ElapsedTime = 0.0;
+}
+
 const float DefaultProjectileSpeed = 15000.0;
+const float DefaultBeamSpeed = 35000.0;
+const float BeamSustainTime = 0.25;
 
 class UWeaponSubsystem : UScriptWorldSubsystem
 {
     private TArray<FPendingVfxProjectile> ActiveShots;
+    private TArray<FPendingVfxBeam> ActiveBeams;
 
     UFUNCTION()
     void FireProjectile(
@@ -57,6 +73,76 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         }
 
         ActiveShots.Add(NewShot);
+    }
+
+    UFUNCTION()
+    void FireBeam(
+        UNiagaraSystem BeamVfx,
+        UNiagaraSystem ImpactVfx,
+        USceneComponent SourceRootComponent,
+        USceneComponent TargetRootComponent,
+        FVector OffsetPosition)
+    {
+        if (SourceRootComponent == nullptr || TargetRootComponent == nullptr || BeamVfx == nullptr)
+            return;
+
+        const FVector TargetLoc = TargetRootComponent.WorldLocation + OffsetPosition;
+        const float Distance2D = (TargetLoc - SourceRootComponent.WorldLocation).Size2D();
+
+        const float TravelTime = Math::GetMappedRangeValueUnclamped(
+            FVector2D(0.0, DefaultBeamSpeed), 
+            FVector2D(SMALL_NUMBER, 1), 
+            Distance2D
+        );
+        const float Duration = TravelTime * 2.0 + BeamSustainTime;
+
+        UNiagaraComponent LaserComp = Niagara::SpawnSystemAtLocation(
+            BeamVfx,
+            SourceRootComponent.WorldLocation,
+            FRotator::ZeroRotator,
+            FVector(1.0),
+            true,
+            true
+        );
+
+        if (LaserComp != nullptr)
+        {
+            LaserComp.SetFloatParameter(n"TravelTime", TravelTime);
+            LaserComp.SetFloatParameter(n"Duration", Duration);
+            LaserComp.SetFloatParameter(n"HoldTime", BeamSustainTime);
+            LaserComp.SetVectorParameter(n"BeamStart", SourceRootComponent.WorldLocation);
+            LaserComp.SetVectorParameter(n"BeamEnd", TargetLoc);
+        }
+
+        // 2. Spawn Impact VFX attached 75 units in direction from TargetLoc to MuzzleLocation
+        UNiagaraComponent ImpactComp = nullptr;
+        if (ImpactVfx != nullptr && TargetRootComponent != nullptr)
+        {
+            const FVector DirToMuzzle = (SourceRootComponent.WorldLocation - TargetLoc).GetSafeNormal();
+            const FVector ImpactWorldLoc = TargetLoc + (DirToMuzzle * 75.0); //TODO: change hardcoded value
+
+            ImpactComp = Niagara::SpawnSystemAttached(
+                ImpactVfx,
+                TargetRootComponent,
+                NAME_None,
+                ImpactWorldLoc,
+                FRotator::ZeroRotator,
+                EAttachLocation::KeepWorldPosition,
+                true,
+                true
+            );
+        }
+
+        FPendingVfxBeam NewBeam;
+        NewBeam.LaserTemplateNS = LaserComp;
+        NewBeam.ImpactTemplateNS = ImpactComp;
+        NewBeam.SourceComponent = SourceRootComponent;
+        NewBeam.TargetComponent = TargetRootComponent;
+        NewBeam.OffsetPosition = OffsetPosition;
+        NewBeam.Duration = Duration;
+        NewBeam.ElapsedTime = 0.0;
+
+        ActiveBeams.Add(NewBeam);
     }
 
     UFUNCTION(BlueprintOverride)
@@ -116,7 +202,31 @@ class UWeaponSubsystem : UScriptWorldSubsystem
             }
         }
 
-        //Beams
+        //Projectile "Water Jet" style Beams
+        for (int32 i = ActiveBeams.Num() - 1; i >= 0; --i)
+        {
+            FPendingVfxBeam& Beam = ActiveBeams[i];
+            Beam.ElapsedTime += DeltaTime;
+
+            if (!(Beam.TargetComponent != nullptr && Beam.SourceComponent != nullptr) || Beam.ElapsedTime >= Beam.Duration)
+            {
+                if (Beam.LaserTemplateNS != nullptr)
+                {
+                    Beam.LaserTemplateNS.Deactivate();
+                }
+
+                if (Beam.ImpactTemplateNS != nullptr)
+                {
+                    Beam.ImpactTemplateNS.Deactivate();
+                }
+
+                ActiveBeams.RemoveAtSwap(i);
+                continue;
+            }
+
+            Beam.LaserTemplateNS.SetVectorParameter(n"BeamStart", Beam.SourceComponent.WorldLocation);
+            Beam.LaserTemplateNS.SetVectorParameter(n"BeamEnd", Beam.TargetComponent.WorldLocation + Beam.OffsetPosition);
+        }
         
     }
 }

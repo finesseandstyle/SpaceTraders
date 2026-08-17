@@ -99,13 +99,13 @@ class ATopDown_GameState : AGameStateBase
             SetActorTickEnabled(true);
             NormalizedTurnProgress = 0.0; //otherwise ships will teleport to their destination on the 1st frame
             
+            OnTurnResume.Broadcast();
+            HandleTurn();
             for (AGameObject GameObject : GameObjects)
             {
                 if (GameObject != nullptr) //Dirty fix for destroyed objects not updating the array
                     GameObject.TurnResume();
             }
-            OnTurnResume.Broadcast();
-            HandleTurn();
         }
     }
 

@@ -790,8 +790,8 @@ class UShipStateComponent : UActorComponent
                 ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_Overload, FActiveEffect(3, 1.0, 1.0));
                 OnOverheated.Broadcast(this);
             }
-            OnHeatChanged.Broadcast(CurrentHeat, MaxHeat);
         }
+        OnHeatChanged.Broadcast(CurrentHeat, MaxHeat);
     }
 
     UFUNCTION()
@@ -845,7 +845,9 @@ class UShipStateComponent : UActorComponent
         if (!ActiveEffects.Contains(GameplayTags::SpaceShip_ActiveEffect_Overload))
         {
             float Dissipation = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatDissipation, 0.0);
+            //Print(f"Dissipation:{Dissipation}");
             CurrentHeat = Math::Max(0.0, CurrentHeat - Dissipation);
+            OnHeatChanged.Broadcast(CurrentHeat, GetMaxHeat());
         }
 
         //Shield Regen
@@ -882,7 +884,7 @@ class UShipStateComponent : UActorComponent
     UFUNCTION()
     void ProcessActiveEffects()
     {
-        ProcessQueuedActiveEffects();
+        ClearQueuedActiveEffects();
         TArray<FGameplayTag> ActiveEffectsKeys;
         ActiveEffects.GetKeys(ActiveEffectsKeys);
         TArray<FActiveEffect> ActiveEffectsValues;
@@ -918,7 +920,7 @@ class UShipStateComponent : UActorComponent
     //  1. For each Queued Active Effect -> Use the respective function
     //  2. Path Stuff then Clear All Queued active effects
     UFUNCTION()
-    void ProcessQueuedActiveEffects()
+    void ClearQueuedActiveEffects()
     {
         QueuedActiveEffects.Empty();
     }
@@ -980,6 +982,7 @@ class UShipStateComponent : UActorComponent
 
         float Accuracy = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
         float Evasion = Target.GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Evasion, 0.0);
+        float HeatEfficiency = 1 + (1 - GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatEfficiency));
 
         // Per-weapon: this specific weapon's own MaxDamage with DamageGlobal
         // and its own DamageType's bonus already folded in - see
@@ -997,9 +1000,9 @@ class UShipStateComponent : UActorComponent
 
         FDamageCalculationOutput Output = Target.ApplySelfDamage(RolledDamage, Weapon.ShieldBypass, Weapon.DamageType, GlobalDamageModifier);
 
-        AddHeat(Weapon.HeatUse); // firing costs the shooter heat too
+        AddHeat(Weapon.HeatUse * HeatEfficiency); // firing costs the shooter heat too
 
-        return Math::RoundToInt(Output.HullDamage);
+        return Math::RoundToInt(Output.HullDamage + Output.ShieldDamage);
     }
 
     private FGameplayTag GetFactionTargetTag(FGameplayTag TargetFaction)
@@ -1095,6 +1098,8 @@ class UShipStateComponent : UActorComponent
         ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, FActiveEffect(-1, 1.0, 1.0));
         FStatAttribute Accuracy = FStatAttribute(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
         CharacterStats.Add(Accuracy);
+        CharacterStats.Add(FStatAttribute(GameplayTags::SpaceShip_Stat_Positive_HeatDissipation, 15));
+
 
         //AddGlobalModifier(GameplayTags::StatSource_Artifact, GameplayTags::SpaceShip_Stat_Negative_ShipMass, EStatType::Multiplicative, 3.0);
         //SetAfterburners(true);
