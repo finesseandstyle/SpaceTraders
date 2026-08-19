@@ -63,6 +63,7 @@ namespace GameLogic
 
     // ── Accuracy/Evasion-biased damage roll ───────────────────────────────────────
     // StatScale = 6 to match this system's 0-6 Accuracy/Evasion clamp.
+    UFUNCTION()
     const float RollWeaponDamage(float MinDamage, float MaxDamage, float Accuracy, float Evasion) 
     {
         //Special case for weapons with a fixed damage value
@@ -80,6 +81,15 @@ namespace GameLogic
         return (MinDamage < MaxDamage)
             ? Math::Lerp(MinDamage, MaxDamage, RandomAlpha)
             : Math::Lerp(MaxDamage, MinDamage, RandomAlpha);
+    }
+
+    UFUNCTION()
+    FDamageSpec CreateDamageSpec(UShipStateComponent Target, FGameplayTag DamageType, float MinDamage, float MaxDamage, float Accuracy, float ShieldBypass=0.0)
+    {
+        float Evasion = Target.GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Evasion, 0.0);
+        float GlobalDamageModifier = 1.0 + Target.GetFactionDamage();
+        float RolledDamage = GameLogic::RollWeaponDamage(MinDamage, MaxDamage, Accuracy, Evasion);
+        return FDamageSpec(DamageType, RolledDamage, ShieldBypass, GlobalDamageModifier);
     }
 
     FDamageCalculationOutput CalculateDamage(const FDamageCalculationInput& Input)

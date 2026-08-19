@@ -260,6 +260,7 @@ class UTurnBasedMovementComponent : UActorComponent
         {
             MovementState = (bImmediatePickup) ? EShipMovementState::StoppedForPickup : EShipMovementState::Stopped;
             SetComponentTickEnabled(true);
+            SegmentLength = 0.0;
             return;
         }
 
@@ -381,6 +382,20 @@ class UTurnBasedMovementComponent : UActorComponent
     {
         //TODO: On tick we already calculate the current distance, maybe reuse it here?
         return PathSpline.SplineLength - PathSpline.GetDistanceAlongSplineAtLocation(GetOwner().ActorLocation, ESplineCoordinateSpace::World);
+    }
+
+    UFUNCTION(BlueprintPure)
+    float GetInstantSpeed()
+    {
+        return SegmentLength;
+        //float Speed = UPathingUtils::EvalCurveDerivative(MovementCurve, CachedGameState.NormalizedTurnProgress) * SegmentLength;
+        //return MovementCurve != nullptr ? Speed : 0.0;
+    }
+
+    UFUNCTION(BlueprintPure)
+    FVector GetVelocity()
+    {
+        return FVector(GetInstantSpeed()) * GetOwner().ActorForwardVector;
     }
 
     // ==================================================================

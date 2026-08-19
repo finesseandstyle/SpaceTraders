@@ -81,6 +81,43 @@ struct FActiveEffect
     }
 }
 
+struct FDamageSpec
+{
+    UPROPERTY() FGameplayTag DamageType = GameplayTags::DamageType_Generic;
+    UPROPERTY() float UnmitigatedDamage = 0.0;
+    UPROPERTY() float ShieldBypass = 0.0;
+    UPROPERTY() float GlobalDamageModifier = 1.0;
+
+    FDamageSpec(FGameplayTag InDamageType, float InUnmitigatedDamage, float InShieldBypass=0.0, float InGlobalDamageModifier=1.0)
+    {
+        DamageType = InDamageType;
+        UnmitigatedDamage = InUnmitigatedDamage;
+        ShieldBypass = InShieldBypass;
+        GlobalDamageModifier = InGlobalDamageModifier;
+    }
+}
+
+struct FProjectileDamageSpec
+{
+    UPROPERTY() FGameplayTag DamageType = GameplayTags::DamageType_Generic;
+    UPROPERTY() float MinDamage = 0.0;
+    UPROPERTY() float MaxDamage = 0.0;
+    UPROPERTY() float Accuracy = 0.0;
+    UPROPERTY() float ShieldBypass = 0.0;
+    UPROPERTY() USceneComponent HomingTarget;
+    UPROPERTY() int HomingDelay_Turns = 1;
+
+    FProjectileDamageSpec(USceneComponent InHomingTarget, FGameplayTag InDamageType, float InMinDamage, float InMaxDamage, float InAccuracy, float InShieldBypass=0.0, int InHomingDelay=1)
+    {
+        HomingTarget = InHomingTarget;
+        DamageType = InDamageType;
+        MinDamage = InMinDamage;
+        MaxDamage = InMaxDamage;
+        Accuracy = InAccuracy;
+        ShieldBypass = InShieldBypass;
+        HomingDelay_Turns = InHomingDelay;
+    }
+}
 
 class UShipStateComponent : UActorComponent
 {
@@ -927,18 +964,18 @@ class UShipStateComponent : UActorComponent
 
 
     UFUNCTION()
-    FDamageCalculationOutput ApplySelfDamage(float UnmitigatedDamage, float ShieldBypass, FGameplayTag DamageType, float GlobalDamageModifier = 1.0)
+    FDamageCalculationOutput ApplySelfDamage(FDamageSpec InDamage)
     {
         float ArmorNullification = GetActiveEffectValue(GameplayTags::SpaceShip_ActiveEffect_ArmorNullification, 1.0);
         FDamageCalculationInput Input;
-        Input.SourceUnmitigatedDamage = UnmitigatedDamage;
-        Input.SourceShieldBypass = ShieldBypass;
-        Input.SourceGlobalDamageModifier = GlobalDamageModifier;
+        Input.SourceUnmitigatedDamage = InDamage.UnmitigatedDamage;
+        Input.SourceShieldBypass = InDamage.ShieldBypass;
+        Input.SourceGlobalDamageModifier = InDamage.GlobalDamageModifier;
         Input.TargetCurrentShields = CurrentShieldPoints;
         Input.bTargetHasShieldsActive = GetActiveEffectValue(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated) == 1.0;
         Input.TargetShieldDamageBlock = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShieldGeneratorDamageBlock, 0.0);
         Input.TargetShipDamageResistance = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_ShipDamageResistance, 1.0) * ArmorNullification;
-        Input.TargetTypeSpecificResistance = GetResistanceForDamageType(DamageType);
+        Input.TargetTypeSpecificResistance = GetResistanceForDamageType(InDamage.DamageType);
         Input.bTargetIsInvulnerable = GetActiveEffectValue(GameplayTags::SpaceShip_ActiveEffect_Invulnerability) == 1.0;
 
         FDamageCalculationOutput Output = GameLogic::CalculateDamage(Input);
@@ -970,39 +1007,52 @@ class UShipStateComponent : UActorComponent
         return 1.0; // DamageType_Chemical / DamageType_Generic - flat armor only
     }
     
-    UFUNCTION()
-    int FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target)
-    {
-        if (Target == nullptr || !EquipmentSlots.Contains(WeaponSlotTag))
-            return -1;
 
-        UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);//Cast<UItemWeapon>(EquipmentSlots[WeaponSlotTag].GetEquipmentFragment());
-        if (Weapon == nullptr || !Weapon.IsOperational())
-            return - 1;
+    UFUNCTION()
+    bool FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target, float&out TotalDamage=0.0)
+    {
+        UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);
+        if (Target == nullptr || !EquipmentSlots.Contains(WeaponSlotTag) || Weapon == nullptr || !Weapon.IsOperational())
+            return false;
 
         float Accuracy = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
-        float Evasion = Target.GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Evasion, 0.0);
         float HeatEfficiency = 1 + (1 - GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatEfficiency));
 
-        // Per-weapon: this specific weapon's own MaxDamage with DamageGlobal
-        // and its own DamageType's bonus already folded in - see
-        // RecalculateWeaponDamageCache() and the file header for why this
-        // can't be a plain GetShipStat() lookup.
         float EffectiveMaxDamage = GetEffectiveWeaponMaxDamage(WeaponSlotTag);
 
-        float RolledDamage = GameLogic::RollWeaponDamage(Weapon.MinDamage, EffectiveMaxDamage, Accuracy, Evasion);
-
-        // The only bonus still resolved as a true multiplier at damage-resolution
-        // time is the faction bonus - it depends on who we're shooting at, so
-        // unlike the flat bonuses above it can't be baked into MaxDamage ahead
-        // of time.
-        float GlobalDamageModifier = 1.0 + GetShipStat(GetFactionTargetTag(Target.Faction), 0.0);
-
-        FDamageCalculationOutput Output = Target.ApplySelfDamage(RolledDamage, Weapon.ShieldBypass, Weapon.DamageType, GlobalDamageModifier);
+        FDamageSpec Damage = GameLogic::CreateDamageSpec(Target, Weapon.DamageType, Weapon.MinDamage, EffectiveMaxDamage, Accuracy, Weapon.ShieldBypass);
+        FDamageCalculationOutput Output = Target.ApplySelfDamage(Damage);
 
         AddHeat(Weapon.HeatUse * HeatEfficiency); // firing costs the shooter heat too
+        TotalDamage = Math::RoundToFloat(Output.HullDamage + Output.ShieldDamage);
+        return true;
+    }
 
-        return Math::RoundToInt(Output.HullDamage + Output.ShieldDamage);
+    UFUNCTION()
+    float GetFactionDamage()
+    {
+        return GetShipStat(GetFactionTargetTag(Faction), 0.0);
+    }
+
+    UFUNCTION()
+    bool FireProjectileWeapon(FGameplayTag WeaponSlotTag, USceneComponent HomingTarget, FProjectileDamageSpec&out Damage)
+    {
+        UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);
+        if (HomingTarget == nullptr || !EquipmentSlots.Contains(WeaponSlotTag) || Weapon == nullptr || !Weapon.IsOperational())
+            return false;
+
+        Damage = FProjectileDamageSpec(
+                    HomingTarget, 
+                    Weapon.DamageType, 
+                    Weapon.MinDamage, 
+                    GetEffectiveWeaponMaxDamage(WeaponSlotTag), 
+                    GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0),
+                    Weapon.ShieldBypass);
+
+        float HeatEfficiency = 1 + (1 - GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatEfficiency));
+        AddHeat(Weapon.HeatUse * HeatEfficiency); // firing costs the shooter heat too
+
+        return true;
     }
 
     private FGameplayTag GetFactionTargetTag(FGameplayTag TargetFaction)
@@ -1157,7 +1207,8 @@ class UShipStateComponent : UActorComponent
 
         if (TestWeaponDefinition != nullptr)
         {
-            int Damage = FireWeaponAt(GameplayTags::SpaceShip_Equipment_Weapon_1, DummyTarget);
+            float Damage;
+            FireWeaponAt(GameplayTags::SpaceShip_Equipment_Weapon_1, DummyTarget, Damage);
             
             float D_MaxHull = DummyTarget.GetMaxHullPoints();
             float D_HP = DummyTarget.GetCurrentHullPoints();

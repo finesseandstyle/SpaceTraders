@@ -7,7 +7,8 @@ enum EInteractionResult {
         OnStation,
         OnLoot,
         OnSpaceship,
-        OnAsteroid
+        OnAsteroid,
+        OnProjectile
 };
 
 enum EPathingClickType {
@@ -162,6 +163,7 @@ class UTopDownPlannerComponent : UActorComponent
         GameMath::GetObjectAtCursorLocation(PlayfieldLocation, Params, HoveredObject);
             //Print(f"{HoveredObject.ObjectType.TagName}", 0);
 
+        Print(f"{System::GetDisplayName(HoveredObject)}", 0);
         if (HoveredObject != CurrentHoveredObject)
         {
             // Hovered object CHANGED to a new valid actor!
@@ -196,6 +198,9 @@ class UTopDownPlannerComponent : UActorComponent
 
         if (HoveredObject.ObjectType == GameplayTags::GameObject_Loot)
             return EInteractionResult::OnLoot;
+
+        if (HoveredObject.ObjectType == GameplayTags::GameObject_Projectile)
+            return EInteractionResult::OnProjectile;
 
         return EInteractionResult::Invalid;
     }

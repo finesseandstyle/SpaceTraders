@@ -28,10 +28,26 @@ class AGameObject : APawn
         //Body
     }
 
+    UFUNCTION(BlueprintOverride)
+    void BeginPlay()
+    {
+        //System::Delay(0.1, FLatentActionInfo());
+        Cast<ATopDown_GameState>(Gameplay::GetGameState()).GameObjects.Add(this);
+        //Print(f"{System::GetDisplayName(this)}");
+    }
+
+    UFUNCTION(BlueprintOverride)
+    void Destroyed()
+    {
+        Cast<ATopDown_GameState>(Gameplay::GetGameState()).GameObjects.Remove(this);
+    }
+
     //Not advisable way to do this, TODO: find a better way of finding the main mesh of a game object
     UFUNCTION()
     UStaticMeshComponent GetMainMesh()
     {
         return Cast<UStaticMeshComponent>(FindComponentByTag(UStaticMeshComponent, n"MainMesh"));
     }
+
+
 };
