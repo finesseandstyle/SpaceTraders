@@ -1012,18 +1012,19 @@ class UShipStateComponent : UActorComponent
     bool FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target, float&out TotalDamage=0.0)
     {
         UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);
+        //TODO: Implement Max range check
         if (Target == nullptr || !EquipmentSlots.Contains(WeaponSlotTag) || Weapon == nullptr || !Weapon.IsOperational())
             return false;
 
         float Accuracy = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
-        float HeatEfficiency = 1 + (1 - GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatEfficiency));
+        float HeatModifier = 1 / GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatEfficiency);
 
         float EffectiveMaxDamage = GetEffectiveWeaponMaxDamage(WeaponSlotTag);
 
         FDamageSpec Damage = GameLogic::CreateDamageSpec(Target, Weapon.DamageType, Weapon.MinDamage, EffectiveMaxDamage, Accuracy, Weapon.ShieldBypass);
         FDamageCalculationOutput Output = Target.ApplySelfDamage(Damage);
 
-        AddHeat(Weapon.HeatUse * HeatEfficiency); // firing costs the shooter heat too
+        AddHeat(Weapon.HeatUse * HeatModifier); // firing costs the shooter heat too
         TotalDamage = Math::RoundToFloat(Output.HullDamage + Output.ShieldDamage);
         return true;
     }
@@ -1049,12 +1050,13 @@ class UShipStateComponent : UActorComponent
                     GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0),
                     Weapon.ShieldBypass);
 
-        float HeatEfficiency = 1 + (1 - GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatEfficiency));
-        AddHeat(Weapon.HeatUse * HeatEfficiency); // firing costs the shooter heat too
+        float HeatModifier = 1 / GetShipStat(GameplayTags::SpaceShip_Stat_Positive_HeatEfficiency);
+        AddHeat(Weapon.HeatUse * HeatModifier); // firing costs the shooter heat too
 
         return true;
     }
 
+    //TODO: Create a map that maps Faction->Damage and DamageType->Damage
     private FGameplayTag GetFactionTargetTag(FGameplayTag TargetFaction)
     {
         if (GameplayTags::Race_Coalition.MatchesTag(TargetFaction))
