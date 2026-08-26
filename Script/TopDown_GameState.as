@@ -53,14 +53,7 @@ class ATopDown_GameState : AGameStateBase
     UFUNCTION(BlueprintOverride)
     void Tick(float DeltaSeconds)
     {
-        //This is the single authority where we can get the turn's normalized progress, everyone else queries it from here.
-        //NormalizedTurnProgress = System::IsValidTimerHandle(TurnTimer) ? 
-        NormalizedTurnProgress = System::GetTimerElapsedTimeHandle(TurnTimer) / TurnDuration; //: 1.0; 
-        /*for (int32 i = 0; i < GameObjects.Num(); i++)
-        {
-            GameObjects[i].Update(NormalizedTurnProgress);
-        }*/
-        Print(f"{NormalizedTurnProgress}", 0);
+        NormalizedTurnProgress = System::GetTimerElapsedTimeHandle(TurnTimer) / TurnDuration;
     }
 
     //Returns real time seconds elapsed after turn start
@@ -130,7 +123,7 @@ class ATopDown_GameState : AGameStateBase
             {
                 GameObject.TurnUpdate();
             }
-            
+            OnTurnUpdate.Broadcast();
 
 
             TurnTimer = System::SetTimer(this, n"HandleTurn", TurnDuration, false);

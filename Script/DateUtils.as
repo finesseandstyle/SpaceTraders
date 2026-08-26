@@ -35,6 +35,7 @@ namespace DateUtils
     }
 
     // Format any date to "[Day] [MonthName] [Year]"
+    UFUNCTION()
     FText FormatTurnDate(FDateTime DateToFormat)
     {
         int MonthIndex = Math::Clamp(DateToFormat.GetMonth() - 1, 0, 11);

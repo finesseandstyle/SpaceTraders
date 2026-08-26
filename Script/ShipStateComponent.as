@@ -97,20 +97,24 @@ struct FDamageSpec
     }
 }
 
+//Snapshotting a weapon's stat profile that will be passed on to the projectile actor
 struct FProjectileDamageSpec
 {
+    UPROPERTY() USceneComponent HomingTarget;
     UPROPERTY() FGameplayTag DamageType = GameplayTags::DamageType_Generic;
+    UPROPERTY() FGameplayTag WeaponSlot = GameplayTags::SpaceShip_Equipment_Weapon; //1 - 10
     UPROPERTY() float MinDamage = 0.0;
     UPROPERTY() float MaxDamage = 0.0;
     UPROPERTY() float Accuracy = 0.0;
     UPROPERTY() float ShieldBypass = 0.0;
-    UPROPERTY() USceneComponent HomingTarget;
     UPROPERTY() int HomingDelay_Turns = 1;
+    
 
-    FProjectileDamageSpec(USceneComponent InHomingTarget, FGameplayTag InDamageType, float InMinDamage, float InMaxDamage, float InAccuracy, float InShieldBypass=0.0, int InHomingDelay=1)
+    FProjectileDamageSpec(USceneComponent InHomingTarget, FGameplayTag InDamageType, FGameplayTag InWeaponSlot, float InMinDamage, float InMaxDamage, float InAccuracy, float InShieldBypass=0.0, int InHomingDelay=1)
     {
         HomingTarget = InHomingTarget;
         DamageType = InDamageType;
+        WeaponSlot = InWeaponSlot;
         MinDamage = InMinDamage;
         MaxDamage = InMaxDamage;
         Accuracy = InAccuracy;
@@ -1045,6 +1049,7 @@ class UShipStateComponent : UActorComponent
         Damage = FProjectileDamageSpec(
                     HomingTarget, 
                     Weapon.DamageType, 
+                    WeaponSlotTag,
                     Weapon.MinDamage, 
                     GetEffectiveWeaponMaxDamage(WeaponSlotTag), 
                     GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0),

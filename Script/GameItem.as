@@ -295,7 +295,7 @@ class UItemWeapon : UItemEquipment
     //All of these 5 values can be instead read from a Data Table or Asset, aren't expected to be modifiable anyway.
     UPROPERTY() float MinDamage = 10; //Always related to the item's tech leve
     UPROPERTY() float HeatUse = 5.0;
-	UPROPERTY() float MiningEfficiency  = 0.5;
+	UPROPERTY() float MiningEfficiency  = 0.5; //How much  of the asteroid's mass is converted into a lootable quantity
 	UPROPERTY() float ShieldBypass = 0.0;
     
     UPROPERTY() TArray<UOnHitEffect> OnHitEffects; //should we use array of object for this?

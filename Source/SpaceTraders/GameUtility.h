@@ -153,4 +153,8 @@ public:
 	UFUNCTION(BlueprintCallable, meta = (DeterminesOutputType = "FragmentType"))
 	TArray<UItemFragment*> GetItemFragments(const TArray<UItemFragment*>& Fragments,
 	                                        const TSubclassOf<UItemFragment>& FragmentType);
+	
+	// Returns true if mouse is either hovering over UI OR actively clicking/holding a UI widget
+	UFUNCTION(BlueprintPure, Category = "UI")
+	static bool IsCursorOverUI();
 };

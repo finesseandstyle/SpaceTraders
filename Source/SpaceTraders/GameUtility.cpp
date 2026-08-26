@@ -13,6 +13,7 @@
 #include "StructUtils/InstancedStruct.h"
 #include "GameFramework/Pawn.h"
 #include "Item.h"
+#include "Framework/Application/SlateApplication.h"
 
 //Implementation: https://forums.unrealengine.com/t/project-world-to-screen-location-stops-returning-a-value/57135/11
 //Credit to Branden Marais
@@ -697,4 +698,12 @@ FText UGameUtility::WrapLines(const FText& InText, const FString& LineStart, con
 	}
 
 	return FText::FromString(ResultString);
+}
+
+// https://forums.unrealengine.com/t/how-to-detect-mouse-is-over-any-widget/410561/
+bool UGameUtility::IsCursorOverUI()
+{
+	FWidgetPath Path = FSlateApplication::Get().LocateWindowUnderMouse(FSlateApplication::Get().GetCursorPos(), FSlateApplication::Get().GetInteractiveTopLevelWindows(), true);
+	TSharedPtr vp = FSlateApplication::Get().GetGameViewport();
+	return !(Path.IsValid() && (Path.GetLastWidget() == vp.ToSharedRef())); // returns false if it doesn't find anything
 }
