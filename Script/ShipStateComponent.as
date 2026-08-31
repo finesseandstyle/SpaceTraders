@@ -126,6 +126,7 @@ enum EWeaponState {
     Equipped,
     Broken,
     Disabled, //by debuffs for example
+    Pressed, //UI only for the player when they initially press a weapon before targeting
     Targeting
 }
 
@@ -140,6 +141,7 @@ class UShipStateComponent : UActorComponent
     private TMap<FGameplayTag, FComputedWeaponStats> CachedWeaponStats; //Calculated Stats for each individual weapon slot
     UPROPERTY() TMap<FGameplayTag, FActiveEffect> ActiveEffects; 
     UPROPERTY() TMap<FGameplayTag, FActiveEffect> QueuedActiveEffects; //when we want to queue abilities / effects for next turn
+    UPROPERTY() TArray<FWeaponShot> WeaponOrders; //We manually assign each index to the weapon's slot number
     private bool bStatsDirty = true;
 
     // ------------------------------------------------------------------
@@ -163,7 +165,11 @@ class UShipStateComponent : UActorComponent
     void BeginPlay()
     {
         EquipmentSlots.Add(GameplayTags::SpaceShip_Equipment_Hull, FGameItem());
-        
+        for (int32 i = 0; i < 6; i++)
+        {
+            WeaponOrders.Add(FWeaponShot(this, nullptr, this.GetOwner().RootComponent, 
+            nullptr, EWeaponFiringType::Projectile, 30));
+        }
     }
 
     // Helper to query whether a slot is currently open on this ship
@@ -785,6 +791,17 @@ class UShipStateComponent : UActorComponent
         ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_LastShieldHit, FActiveEffect(Delay, 1.0, 1.0)); // resets the regen delay
     }
 
+    UFUNCTION()
+    float GetWeaponRange(FGameplayTag WeaponSlot)
+    {
+        if (!EquipmentSlots.Contains(WeaponSlot))
+            return 0.0;
+        FComputedWeaponStats WeaponStats;
+        // Fetch weapon ranges from ShipStateComponent using slot tag
+        CachedWeaponStats.Find(WeaponSlot, WeaponStats);
+        return WeaponStats.Range;
+    }
+
     // 0-100. Feeds GetReliabilitySpeedMultiplier from ShipCombatMath.as
     // (<10% -> critical penalty, <25% -> major penalty).
     float GetHullReliabilityPercent()
@@ -1019,7 +1036,7 @@ class UShipStateComponent : UActorComponent
     
 
     UFUNCTION()
-    bool FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target, float&out TotalDamage=0.0)
+        bool FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target, float&out TotalDamage=0.0)
     {
         UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);
         //TODO: Implement Max range check
@@ -1151,7 +1168,18 @@ class UShipStateComponent : UActorComponent
         //FGameItem BrokenWeapon;
         UItemWeapon BrokenWeapon = GetWeaponFragment(GameplayTags::SpaceShip_Equipment_Weapon_05);
         BrokenWeapon.CurrentDurability = 0.0;
-        
+
+
+        for (int32 i = 0; i < 5; i++)
+        {
+            WeaponOrders[i].WeaponState = EWeaponState::Equipped;
+            UItemWeapon weapon = GetWeaponFragment(GameLogic::GetWeaponSlot(i));
+            weapon.AddModifier(GameplayTags::StatSource_ScriptedEffect, GameplayTags::SpaceShip_Stat_Positive_Weapon_Range,
+            EStatType::Additive, 40.0 * i);
+            weapon.RecalculateStats();
+        } //6 for normal ships, 10 for stations
+
+        WeaponOrders[4].WeaponState = EWeaponState::Broken; //must update dynamically
 
         if (TestShieldGeneratorDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_ShieldGenerator, InstantiateItem(TestShieldGeneratorDefinition));

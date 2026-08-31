@@ -1,7 +1,7 @@
 struct FPendingVfxProjectile
 {
     UNiagaraComponent NiagaraComponent;
-    AGameObject TargetObject;
+    USceneComponent TargetRoot;
     
     FVector CurrentPosition;
     FVector OffsetPosition; //Maybe change this to the ship's size so that we can randomize our shots
@@ -15,8 +15,8 @@ struct FPendingVfxBeam
 {
     UNiagaraComponent LaserTemplateNS;
     UNiagaraComponent ImpactTemplateNS;
-    USceneComponent SourceComponent;
-    USceneComponent TargetComponent;
+    USceneComponent SourceRoot;
+    USceneComponent TargetRoot;
 
     FVector OffsetPosition;
 
@@ -29,42 +29,71 @@ const float DefaultBeamSpeed = 35000.0;
 const float BeamSustainTime = 0.25;
 const int MaxFiringRounds = 3;
 
-struct FWeaponOrder {
-    AGameObject Source, Target;
-    FGameplayTag SourceWeaponSlot;
-    int FiringRound; //1-3
-    float WeaponInitiative; //1 - 30, higher number = sooner
-
-    bool opCmp(const FWeaponOrder& Other) const
-    {
-        return WeaponInitiative > Other.WeaponInitiative && SourceWeaponSlot.ToString() < Other.SourceWeaponSlot.ToString();
-    }
+enum EWeaponFiringType 
+{
+    //Instant point to point
+    Projectile, 
+    Beam,
+    Cone,
+    Shockwave,
+    //Spawns a AGameObject
+    Ballistic
 }
 
+struct FWeaponShot
+{
+    UShipStateComponent Attacker;
+    UShipStateComponent Target;
+    USceneComponent SourceRoot, TargetRoot; //Both Required for beams, Target required for ballistic firing
+    EWeaponFiringType FiringType; //Instant -> Attacker.FireWeaponAt; Ballistic->Projectile->Attacker.FireProjectileWeapon & Spawn Homing Projectile
+    float Initiative;
+    float FinalFireTime;
+    EWeaponState WeaponState;
+
+    bool opCmp(const FWeaponShot& Other) const
+    {
+        return FinalFireTime < Other.FinalFireTime;
+    }
+
+    FWeaponShot(UShipStateComponent InAttacker, UShipStateComponent InTarget,
+                USceneComponent InSourceRoot, USceneComponent InTargetRoot,
+                EWeaponFiringType InFiringType, float InInitiative, EWeaponState InWeaponState=EWeaponState::Unequipped)
+    {
+        Attacker = InAttacker;
+        Target = InTarget;
+        SourceRoot = InSourceRoot;
+        TargetRoot = InTargetRoot;
+        FiringType = InFiringType;
+        Initiative = InInitiative;
+        WeaponState = InWeaponState;
+    }
+
+};
 
 class UWeaponSubsystem : UScriptWorldSubsystem
 {
     private TArray<FPendingVfxProjectile> ActiveShots;
     private TArray<FPendingVfxBeam> ActiveBeams;
+    private float TurnDuration = 4.0;
 
     UFUNCTION()
     void FireProjectile(
         UNiagaraSystem TracerVfx, 
         UNiagaraSystem ImpactVfx,
         FVector MuzzleLocation, 
-        AGameObject GameObject,
+        USceneComponent TargetRoot,
         FVector OffsetPosition)
     {
-        if (GameObject == nullptr || TracerVfx == nullptr)
+        if (TargetRoot == nullptr || TracerVfx == nullptr)
             return;
 
         FPendingVfxProjectile NewShot;
         NewShot.CurrentPosition = MuzzleLocation;
-        NewShot.TargetObject = GameObject;
+        NewShot.TargetRoot = TargetRoot;
         NewShot.ImpactVfx = ImpactVfx;
         NewShot.OffsetPosition = OffsetPosition; 
 
-        FVector InitialTargetPos = GameObject.ActorLocation;
+        FVector InitialTargetPos = TargetRoot.WorldLocation;
         FVector InitialDir = (InitialTargetPos - MuzzleLocation).GetSafeNormal();
         FRotator InitialRotation = InitialDir.IsNearlyZero() ? FRotator::ZeroRotator : InitialDir.Rotation();
 
@@ -150,8 +179,8 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         FPendingVfxBeam NewBeam;
         NewBeam.LaserTemplateNS = LaserComp;
         NewBeam.ImpactTemplateNS = ImpactComp;
-        NewBeam.SourceComponent = SourceRootComponent;
-        NewBeam.TargetComponent = TargetRootComponent;
+        NewBeam.SourceRoot = SourceRootComponent;
+        NewBeam.TargetRoot = TargetRootComponent;
         NewBeam.OffsetPosition = OffsetPosition;
         NewBeam.Duration = Duration;
         NewBeam.ElapsedTime = 0.0;
@@ -168,7 +197,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
             FPendingVfxProjectile& Shot = ActiveShots[i];
 
             const float FullStep = DefaultProjectileSpeed * DeltaTime;
-            const FVector TargetLocation = Shot.TargetObject.ActorLocation + Shot.OffsetPosition;
+            const FVector TargetLocation = Shot.TargetRoot.WorldLocation + Shot.OffsetPosition;
 
             // Compute vector and distance to target BEFORE updating position
             const FVector ToTarget = TargetLocation - Shot.CurrentPosition;
@@ -190,7 +219,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
                 {
                     Niagara::SpawnSystemAttached(
                         Shot.ImpactVfx,
-                        Shot.TargetObject.RootComponent,
+                        Shot.TargetRoot,
                         NAME_None,
                         TargetLocation,
                         ImpactRotation,
@@ -222,7 +251,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
             FPendingVfxBeam& Beam = ActiveBeams[i];
             Beam.ElapsedTime += DeltaTime;
 
-            if (!(Beam.TargetComponent != nullptr && Beam.SourceComponent != nullptr) || Beam.ElapsedTime >= Beam.Duration)
+            if (!(Beam.TargetRoot != nullptr && Beam.SourceRoot != nullptr) || Beam.ElapsedTime >= Beam.Duration)
             {
                 if (Beam.LaserTemplateNS != nullptr)
                 {
@@ -238,9 +267,62 @@ class UWeaponSubsystem : UScriptWorldSubsystem
                 continue;
             }
 
-            Beam.LaserTemplateNS.SetVectorParameter(n"BeamStart", Beam.SourceComponent.WorldLocation);
-            Beam.LaserTemplateNS.SetVectorParameter(n"BeamEnd", Beam.TargetComponent.WorldLocation + Beam.OffsetPosition);
+            Beam.LaserTemplateNS.SetVectorParameter(n"BeamStart", Beam.SourceRoot.WorldLocation);
+            Beam.LaserTemplateNS.SetVectorParameter(n"BeamEnd", Beam.TargetRoot.WorldLocation + Beam.OffsetPosition);
         }
+    }
+
+    TArray<FWeaponShot> CalculateFiringTimeline(TArray<UShipStateComponent> ActiveShips)
+    {
+        TArray<FWeaponShot> PendingShots;
+        TMap<UShipStateComponent, int> TargetCounts;
+
+        // 1. No gathering, individual ships add orders to the subsystem on their own
+
+        // 2. Calculate execution timeline based on target groupings
+        int TotalEngagedTargets = TargetCounts.Num();
         
+        // Distribute independent engagements evenly across the turn
+        float SpreadInterval = TurnDuration / Math::Max(1, TotalEngagedTargets);
+        int CurrentPairIndex = 0;
+
+        TArray<FWeaponShot> FinalTimeline;
+
+        for (auto Kvp : TargetCounts)
+        {
+            UShipStateComponent PinnedTarget = Kvp.Key;
+            int AttackerCount = Kvp.Value;
+
+            // Base timestamp for this specific engagement cluster
+            float ClusterStartTime = CurrentPairIndex * SpreadInterval;
+
+            // Swarm vs Duel Logic:
+            // If many attackers (Swarm), TimeWindow shrinks, causing a rapid burst.
+            // If 1v1 (Duel), TimeWindow utilizes the full interval, spreading shots out.
+            float BurstCompression = 1.0 / float(AttackerCount);
+            float TimeWindow = SpreadInterval * BurstCompression;
+
+            // 3. Apply Initiative within the dynamically scaled time window
+            for (int i = PendingShots.Num() - 1; i >= 0; i--)
+            {
+                if (PendingShots[i].Target == PinnedTarget)
+                {
+                    FWeaponShot FinalShot = PendingShots[i];
+                    
+                    // The weapon's initiative determines exactly when it fires inside the cluster
+                    float InitiativeOffset = FinalShot.Initiative * TimeWindow;
+                    FinalShot.FinalFireTime = ClusterStartTime + InitiativeOffset;
+                    
+                    FinalTimeline.Add(FinalShot);
+                    PendingShots.RemoveAt(i);
+                }
+            }
+            
+            CurrentPairIndex++;
+        }
+
+        // 4. Sort the completed timeline chronologically for the execution manager
+        FinalTimeline.Sort();
+        return FinalTimeline;
     }
 }

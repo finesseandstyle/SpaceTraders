@@ -9,14 +9,14 @@ enum EInteractionResult {
         OnSpaceship,
         OnAsteroid,
         OnProjectile
-};
+}
 
 enum EPathingClickType {
     NewPath,
     AddWaypointToPath,
     QueuePathMidTurn,
     CancelPathQueueing,
-};
+}
 
 enum ETurnMovementType {
     Fly,
@@ -26,7 +26,7 @@ enum ETurnMovementType {
     AutoFight,
     LongRange,
     Hyperjump
-};
+}
 
 event void FOnHoveredObjectChanged(AGameObject PreviousObject, AGameObject Object);
 
@@ -43,6 +43,7 @@ class UTopDownPlannerComponent : UActorComponent
 
     UPROPERTY() AGameObject PlayerShip;
     UPROPERTY() UTurnBasedMovementComponent MoveComp;
+    UPROPERTY() UShipStateComponent ShipComp;
 
     UPROPERTY() TArray<AActor> ActorsToIgnore; //Playfield and any helper actors that should not obstruct hovering
     UPROPERTY() TArray<AActor> Stars;
@@ -96,6 +97,7 @@ class UTopDownPlannerComponent : UActorComponent
         //SetTickGroup(ETickingGroup::TG_PostPhysics);
         TurnMarker.SetActorHiddenInGame(true);
         MoveComp = PlayerShip.GetComponentByClass(UTurnBasedMovementComponent); 
+        ShipComp = PlayerShip.GetComponentByClass(UShipStateComponent); 
         InitializeRangeIndicator();
     }
 
@@ -395,4 +397,126 @@ class UTopDownPlannerComponent : UActorComponent
 
         return NearestShip;
     }
-};
+    
+    //Select a weapon from 0 to 5 (up to 9 with stations)
+    // true = list is not empty = start combat cursor mode
+    // false = list is empty back to select cursor mode
+    UFUNCTION()
+    bool SelectWeapon(int WeaponIndex) {
+        //toggle the selected index
+        switch (ShipComp.WeaponOrders[WeaponIndex].WeaponState)
+        {
+            case EWeaponState::Equipped:
+            {
+                ShipComp.WeaponOrders[WeaponIndex].WeaponState = EWeaponState::Pressed;
+                break;
+            }
+            case EWeaponState::Pressed:
+            {
+                ShipComp.WeaponOrders[WeaponIndex].WeaponState = EWeaponState::Equipped;
+                break;
+            }
+            default: return false;
+        }
+
+        //Get our min and max weapon ranges
+        int PressedWeapons = 0;
+        TArray<int> SelectedWeapons;
+        for (int32 i = 0; i < ShipComp.WeaponOrders.Num(); i++)
+        {
+            switch (ShipComp.WeaponOrders[i].WeaponState)
+            {
+                case EWeaponState::Pressed:
+                {
+                    PressedWeapons++;
+                    SelectedWeapons.Add(i);
+                    break;
+                }
+                default: break;
+            }
+        }
+
+        // Update weapon range indicators based on selection count and ranges
+        if (SelectedWeapons.Num() == 0)
+        {
+            WeaponMinRangeIndicator.SetIndicatorVisibility(false);
+            WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
+            DamageFalloffIndicator.SetIndicatorVisibility(false);
+            return false;
+        }
+        else if (SelectedWeapons.Num() == 1)
+        {
+            FGameplayTag SlotTag = GameLogic::GetWeaponSlot(SelectedWeapons[0]);
+            
+            float WeaponRange = ShipComp.GetWeaponRange(SlotTag) * 10;
+
+            WeaponMinRangeIndicator.SetRadius(WeaponRange);
+            WeaponMinRangeIndicator.SetIndicatorVisibility(true);
+
+            DamageFalloffIndicator.SetRadius(WeaponRange + GameLogic::FalloffRange);
+            DamageFalloffIndicator.SetIndicatorVisibility(true);
+
+            WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
+        }
+        else // 2 or more weapons selected
+        {
+            float GlobalMinRange = MAX_flt;
+            float GlobalMaxRange = -1.0f;
+
+            for (int Index : SelectedWeapons)
+            {
+                FGameplayTag SlotTag = GameLogic::GetWeaponSlot(Index);
+                float WeaponRange = ShipComp.GetWeaponRange(SlotTag) * 10;
+
+                if (WeaponRange < GlobalMinRange) GlobalMinRange = WeaponRange;
+                if (WeaponRange > GlobalMaxRange) GlobalMaxRange = WeaponRange;
+            }
+
+            DamageFalloffIndicator.SetIndicatorVisibility(false);
+
+            // If all selected weapons have identical ranges
+            if (Math::Abs(GlobalMinRange - GlobalMaxRange) < 0.01f)
+            {
+                WeaponMinRangeIndicator.SetRadius(GlobalMinRange);
+                WeaponMinRangeIndicator.SetIndicatorVisibility(true);
+
+                WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
+            }
+            else // Selected weapons have different ranges
+            {
+                WeaponMinRangeIndicator.SetRadius(GlobalMinRange);
+                WeaponMinRangeIndicator.SetIndicatorVisibility(true);
+
+                WeaponMaxRangeIndicator.SetRadius(GlobalMaxRange);
+                WeaponMaxRangeIndicator.SetIndicatorVisibility(true);
+            }
+        }
+        
+        PickupRangeIndicator.SetIndicatorVisibility(false);
+        return true;
+    }
+
+    UFUNCTION()
+    void DropFiringList()
+    {
+        for (int32 i = 0; i < ShipComp.WeaponOrders.Num(); i++)
+        {
+            //TODO: return to its default state which might not be equipped
+            switch (ShipComp.WeaponOrders[i].WeaponState)
+            {
+                case EWeaponState::Pressed:
+                {
+                    ShipComp.WeaponOrders[i].WeaponState = EWeaponState::Equipped;
+                    break;
+                }
+                default: break;
+            }
+        }
+        // Hide all range indicators
+        WeaponMinRangeIndicator.SetIndicatorVisibility(false);
+        WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
+        DamageFalloffIndicator.SetIndicatorVisibility(false);
+    }
+
+    
+}

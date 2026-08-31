@@ -41,6 +41,8 @@ namespace GameLogic
     const float MaxSpeedMass = 750;
     const float MinSpeedMass = 2500;
 
+    const float FalloffRange = 750.0;
+
     //Pickups
     const float SnapCollectRadius = 20.0; //When an item's distance is < this, instantly pick up
     const float ContestHysteresis = 1.5;  //How much bigger an opposing actor's score need to be to claim an item.
@@ -308,5 +310,23 @@ namespace GameLogic
         }
 
         return Result;
+    }
+
+    FGameplayTag GetWeaponSlot(int Index)
+    {
+        switch (Index)
+        {
+            case 0: return GameplayTags::SpaceShip_Equipment_Weapon_01;
+            case 1: return GameplayTags::SpaceShip_Equipment_Weapon_02;
+            case 2: return GameplayTags::SpaceShip_Equipment_Weapon_03;
+            case 3: return GameplayTags::SpaceShip_Equipment_Weapon_04;
+            case 4: return GameplayTags::SpaceShip_Equipment_Weapon_05;
+            case 5: return GameplayTags::SpaceShip_Equipment_Weapon_06;
+            case 6: return GameplayTags::SpaceShip_Equipment_Weapon_07;
+            case 7: return GameplayTags::SpaceShip_Equipment_Weapon_08;
+            case 8: return GameplayTags::SpaceShip_Equipment_Weapon_09;
+            case 9: return GameplayTags::SpaceShip_Equipment_Weapon_10;
+            default: return FGameplayTag();
+        }
     }
 }
