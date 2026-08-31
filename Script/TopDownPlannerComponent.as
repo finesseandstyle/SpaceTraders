@@ -47,6 +47,7 @@ class UTopDownPlannerComponent : UActorComponent
     UPROPERTY() TArray<AActor> ActorsToIgnore; //Playfield and any helper actors that should not obstruct hovering
     UPROPERTY() TArray<AActor> Stars;
 
+    UPROPERTY() bool bCursorOverUI = false;
     UPROPERTY() bool bMultiWaypoint = false;
     UPROPERTY() bool bRotatingPath = false;
     UPROPERTY() float PathClickingDistance = 100;
@@ -158,18 +159,26 @@ class UTopDownPlannerComponent : UActorComponent
     UFUNCTION(BlueprintOverride)
     void Tick(float DeltaSeconds)
     {
+        bCursorOverUI = UGameUtility::IsCursorOverUI();
         bHasResult = GameMath::GetPlayfieldLocation(Gameplay::GetPlayerController(0), PlayfieldLocation);
         
         GameMath::GetObjectAtCursorLocation(PlayfieldLocation, Params, HoveredObject);
-            //Print(f"{HoveredObject.ObjectType.TagName}", 0);
 
-        Print(f"{System::GetDisplayName(HoveredObject)}", 0);
-        if (HoveredObject != CurrentHoveredObject)
+        //Print(f"{System::GetDisplayName(HoveredObject)}", 0);
+        
+        //Ignore all objects if mouse is hovering over the UI
+        if (bCursorOverUI && CurrentHoveredObject != nullptr)
+        {
+            OnHoveredObjectChanged.Broadcast(CurrentHoveredObject, nullptr);
+            CurrentHoveredObject = nullptr;
+            return;
+        }
+
+        if (!bCursorOverUI && HoveredObject != CurrentHoveredObject)
         {
             // Hovered object CHANGED to a new valid actor!
             OnHoveredObjectChanged.Broadcast(CurrentHoveredObject, HoveredObject);
 
-            // Update tracking reference
             CurrentHoveredObject = HoveredObject;
         }
     }

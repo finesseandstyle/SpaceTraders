@@ -1,19 +1,21 @@
-event void FOnTurnUpdate2();
-event void FOnTurnResume2();
-event void FOnTurnPaused2();
-event void FOnSmallObjectSpawned2();
-event void FOnSmallObjectDestroyed2();
+event void FOnTurnUpdate();
+event void FOnTurnResume();
+event void FOnTurnPaused();
+event void FOnTurnDurationChanged();
+event void FOnSmallObjectSpawned();
+event void FOnSmallObjectDestroyed();
 event void FOnGameStateInitialized();
 
 class ATopDown_GameState : AGameStateBase
 {
     const FTimespan OneTurn = FTimespan::FromDays(1);
 
-    UPROPERTY() FOnTurnUpdate2 OnTurnUpdate;
-    UPROPERTY() FOnTurnResume2 OnTurnResume;
-    UPROPERTY() FOnTurnPaused2 OnTurnPaused;
-    UPROPERTY() FOnSmallObjectSpawned2 OnSmallObjectSpawned;
-    UPROPERTY() FOnSmallObjectDestroyed2 OnSmallObjectDestroyed;
+    UPROPERTY() FOnTurnUpdate OnTurnUpdate;
+    UPROPERTY() FOnTurnResume OnTurnResume;
+    UPROPERTY() FOnTurnPaused OnTurnPaused;
+    UPROPERTY() FOnTurnDurationChanged OnTurnDurationChanged;
+    UPROPERTY() FOnSmallObjectSpawned OnSmallObjectSpawned;
+    UPROPERTY() FOnSmallObjectDestroyed OnSmallObjectDestroyed;
     UPROPERTY() FOnGameStateInitialized OnGameStateReady;
 
     //1 January 3300
@@ -33,13 +35,13 @@ class ATopDown_GameState : AGameStateBase
     UPROPERTY() bool bIsGamePaused = false;
 
     UPROPERTY() TArray<AGameObject> GameObjects;
+    UPROPERTY() TArray<AGameObject> Planets;
 
     bool bQueuePause = false;
 
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
     {
-        //Print("hello");
         bQueuePause = true;
         bIsGamePaused = true;
         TurnDuration = UTopDown_Settings().GetTurnDuration();
@@ -107,7 +109,8 @@ class ATopDown_GameState : AGameStateBase
     {
         if (bIsGamePaused)
         {
-            TurnDuration = NewTurnDuration; //input validation is done inside settings menu UI
+            TurnDuration = NewTurnDuration; //input validation is done inside settings menu UI;
+            OnTurnDurationChanged.Broadcast();
         }
     }
 

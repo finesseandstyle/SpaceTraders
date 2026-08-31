@@ -31,9 +31,7 @@ class AGameObject : APawn
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
     {
-        //System::Delay(0.1, FLatentActionInfo());
         Cast<ATopDown_GameState>(Gameplay::GetGameState()).GameObjects.Add(this);
-        //Print(f"{System::GetDisplayName(this)}");
     }
 
     UFUNCTION(BlueprintOverride)

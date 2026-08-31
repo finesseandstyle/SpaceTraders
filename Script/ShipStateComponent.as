@@ -21,11 +21,9 @@
 //     that's correct for all of them. Instead there's a second, per-weapon
 //     cache (CachedWeaponMaxDamage, keyed by slot tag) rebuilt alongside the
 //     main one - see RecalculateWeaponDamageCache() and GameLogic::ApplyModifierGroup.
-//   - Slot tags such as SpaceShip_Equipment_Weapon_1 are assumed to be real
+//   - Slot tags such as SpaceShip_Equipment_Weapon_01 are assumed to be real
 //     dot-hierarchy children of SpaceShip_Equipment_Weapon, so
 //     FGameplayTag::MatchesTag() works for slot/item-type compatibility.
-//   - Print(FString) / f-strings are used per your RunSelfTest edit - swap if
-//     your project's debug logging differs.
 // ============================================================================
 
 event void FShipHullDestroyed(UShipStateComponent Ship);
@@ -123,6 +121,14 @@ struct FProjectileDamageSpec
     }
 }
 
+enum EWeaponState {
+    Unequipped,
+    Equipped,
+    Broken,
+    Disabled, //by debuffs for example
+    Targeting
+}
+
 class UShipStateComponent : UActorComponent
 {
     UPROPERTY() FGameplayTag Faction;
@@ -133,7 +139,7 @@ class UShipStateComponent : UActorComponent
     private TMap<FGameplayTag, float> CachedShipStats; //Final Stats for ship wide stats, recalculated only when needed.
     private TMap<FGameplayTag, FComputedWeaponStats> CachedWeaponStats; //Calculated Stats for each individual weapon slot
     UPROPERTY() TMap<FGameplayTag, FActiveEffect> ActiveEffects; 
-    UPROPERTY() TMap<FGameplayTag, FActiveEffect> QueuedActiveEffects; 
+    UPROPERTY() TMap<FGameplayTag, FActiveEffect> QueuedActiveEffects; //when we want to queue abilities / effects for next turn
     private bool bStatsDirty = true;
 
     // ------------------------------------------------------------------
@@ -478,7 +484,7 @@ class UShipStateComponent : UActorComponent
     // Can't reuse CachedShipStats for this - see the file header.
     private void RecalculateWeaponDamageCache(const TArray<FGameplayTag>& SlotTags)
     {
-            for (FGameplayTag SlotTag : SlotTags)
+        for (FGameplayTag SlotTag : SlotTags)
         {
             FGameItem Item = EquipmentSlots[SlotTag];
             if (!Item.IsValid())
@@ -1135,7 +1141,17 @@ class UShipStateComponent : UActorComponent
         SwapItem(GameplayTags::SpaceShip_Equipment_Hull, InstantiateItem(TestHullDefinition));
     
         if (TestWeaponDefinition != nullptr)
-            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_1, InstantiateItem(TestWeaponDefinition));
+        {
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_01, InstantiateItem(TestWeaponDefinition));
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_02, InstantiateItem(TestWeaponDefinition));
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_03, InstantiateItem(TestWeaponDefinition));
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_04, InstantiateItem(TestWeaponDefinition));
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_05, InstantiateItem(TestWeaponDefinition));
+        }
+        //FGameItem BrokenWeapon;
+        UItemWeapon BrokenWeapon = GetWeaponFragment(GameplayTags::SpaceShip_Equipment_Weapon_05);
+        BrokenWeapon.CurrentDurability = 0.0;
+        
 
         if (TestShieldGeneratorDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_ShieldGenerator, InstantiateItem(TestShieldGeneratorDefinition));
@@ -1215,7 +1231,7 @@ class UShipStateComponent : UActorComponent
         if (TestWeaponDefinition != nullptr)
         {
             float Damage;
-            FireWeaponAt(GameplayTags::SpaceShip_Equipment_Weapon_1, DummyTarget, Damage);
+            FireWeaponAt(GameplayTags::SpaceShip_Equipment_Weapon_01, DummyTarget, Damage);
             
             float D_MaxHull = DummyTarget.GetMaxHullPoints();
             float D_HP = DummyTarget.GetCurrentHullPoints();

@@ -27,6 +27,20 @@ struct FPendingVfxBeam
 const float DefaultProjectileSpeed = 15000.0;
 const float DefaultBeamSpeed = 35000.0;
 const float BeamSustainTime = 0.25;
+const int MaxFiringRounds = 3;
+
+struct FWeaponOrder {
+    AGameObject Source, Target;
+    FGameplayTag SourceWeaponSlot;
+    int FiringRound; //1-3
+    float WeaponInitiative; //1 - 30, higher number = sooner
+
+    bool opCmp(const FWeaponOrder& Other) const
+    {
+        return WeaponInitiative > Other.WeaponInitiative && SourceWeaponSlot.ToString() < Other.SourceWeaponSlot.ToString();
+    }
+}
+
 
 class UWeaponSubsystem : UScriptWorldSubsystem
 {

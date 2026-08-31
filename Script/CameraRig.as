@@ -21,6 +21,7 @@ class ACameraRig : APawn
     UPROPERTY(Category = "Camera Config") bool bSmoothZoom = true;
     UPROPERTY(Category = "Camera Config") float RecenterDuration = 1;
     UPROPERTY(Category = "Camera Config") float ArrivalDampeningDistance = 5000.0;
+    
 
     // --- State ---
     UPROPERTY(Category = "Camera State") bool bIsFollowing = false;
@@ -33,6 +34,7 @@ class ACameraRig : APawn
     UPROPERTY(Category = "Camera State") float TransitionElapsed = 0.0;
     UPROPERTY(Category = "Camera State") bool bIsTransitioningOffsetToZero = false;
     UPROPERTY(Category = "Camera State") float RemainingPathDistance = -1.0;
+    UPROPERTY(Category = "Camera State") bool bIsInsideMinimap = false;
 
     private float OldSpringArmLength, NewSpringArmLength;
     private FVector OldZoomLoc, NewZoomLoc, TargetPlayfieldLocation;
@@ -307,5 +309,12 @@ class ACameraRig : APawn
         float OffsetX = InputAxis * Delta * SpringArm.TargetArmLength * ScrollSpeed;
         
         AddActorWorldOffset(FVector(OffsetX, 0, 0));
+    }
+    
+    UFUNCTION()
+    void SetCameraLocation(FVector WorldLocation)
+    {
+        SetFreeCamera();
+        SetActorLocation(FVector(WorldLocation.X, WorldLocation.Y, ZLevel));
     }
 };
