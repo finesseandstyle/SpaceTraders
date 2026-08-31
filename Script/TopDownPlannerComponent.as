@@ -404,19 +404,22 @@ class UTopDownPlannerComponent : UActorComponent
     UFUNCTION()
     bool SelectWeapon(int WeaponIndex) {
         //toggle the selected index
+        bool bToggledWeapon = false;
         switch (ShipComp.WeaponOrders[WeaponIndex].WeaponState)
         {
             case EWeaponState::Equipped:
             {
                 ShipComp.WeaponOrders[WeaponIndex].WeaponState = EWeaponState::Pressed;
+                bToggledWeapon = true;
                 break;
             }
             case EWeaponState::Pressed:
             {
                 ShipComp.WeaponOrders[WeaponIndex].WeaponState = EWeaponState::Equipped;
+                bToggledWeapon = true;
                 break;
             }
-            default: return false;
+            default: break;
         }
 
         //Get our min and max weapon ranges
@@ -435,6 +438,9 @@ class UTopDownPlannerComponent : UActorComponent
                 default: break;
             }
         }
+
+        if (!bToggledWeapon)
+            return PressedWeapons > 0;
 
         // Update weapon range indicators based on selection count and ranges
         if (SelectedWeapons.Num() == 0)
@@ -493,6 +499,7 @@ class UTopDownPlannerComponent : UActorComponent
         }
         
         PickupRangeIndicator.SetIndicatorVisibility(false);
+        RadarRangeIndicator.SetIndicatorVisibility(true);
         return true;
     }
 
@@ -516,6 +523,7 @@ class UTopDownPlannerComponent : UActorComponent
         WeaponMinRangeIndicator.SetIndicatorVisibility(false);
         WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
         DamageFalloffIndicator.SetIndicatorVisibility(false);
+        RadarRangeIndicator.SetIndicatorVisibility(false);
     }
 
     

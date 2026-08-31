@@ -41,7 +41,7 @@ namespace GameLogic
     const float MaxSpeedMass = 750;
     const float MinSpeedMass = 2500;
 
-    const float FalloffRange = 750.0;
+    const float FalloffRange = 1000.0;
 
     //Pickups
     const float SnapCollectRadius = 20.0; //When an item's distance is < this, instantly pick up
