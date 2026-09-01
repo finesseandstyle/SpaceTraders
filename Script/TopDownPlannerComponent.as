@@ -508,7 +508,6 @@ class UTopDownPlannerComponent : UActorComponent
     {
         for (int32 i = 0; i < ShipComp.WeaponOrders.Num(); i++)
         {
-            //TODO: return to its default state which might not be equipped
             switch (ShipComp.WeaponOrders[i].WeaponState)
             {
                 case EWeaponState::Pressed:
@@ -523,7 +522,134 @@ class UTopDownPlannerComponent : UActorComponent
         WeaponMinRangeIndicator.SetIndicatorVisibility(false);
         WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
         DamageFalloffIndicator.SetIndicatorVisibility(false);
-        RadarRangeIndicator.SetIndicatorVisibility(false);
+
+        if (HoveredObject == nullptr)
+        {
+            RadarRangeIndicator.SetIndicatorVisibility(false);
+            return;
+        }
+
+        if (HoveredObject.ObjectType == GameplayTags::GameObject_Loot)
+            PickupRangeIndicator.SetIndicatorVisibility(true);
+    }
+
+    UFUNCTION()
+    bool ToggleAllWeapons()
+    {
+        int PressedWeapons = 0;
+        int MaximumSelectableWeapons = 0;
+        TArray<int> SelectedWeapons;
+        for (int32 i = 0; i < ShipComp.WeaponOrders.Num(); i++)
+        {
+            switch (ShipComp.WeaponOrders[i].WeaponState)
+            {
+                case EWeaponState::Pressed:
+                {
+                    MaximumSelectableWeapons++;
+                    PressedWeapons++;
+                    break;
+                }
+                case EWeaponState::Equipped:
+                {
+                    MaximumSelectableWeapons++;
+                    break;
+                }
+                default: break;
+            }
+        }
+
+        if (PressedWeapons < MaximumSelectableWeapons && MaximumSelectableWeapons > 1)
+        {
+            //Toggle all weapons
+            for (int32 i = 0; i < ShipComp.WeaponOrders.Num(); i++)
+            {
+                switch (ShipComp.WeaponOrders[i].WeaponState)
+                {
+                    case EWeaponState::Pressed:
+                    {
+                        SelectedWeapons.Add(i);
+                        break;
+                    }
+                    case EWeaponState::Equipped:
+                    {
+                        ShipComp.WeaponOrders[i].WeaponState = EWeaponState::Pressed;
+                        SelectedWeapons.Add(i);
+                        break;
+                    }
+                    default: break;
+                }
+            }
+            // Update weapon range indicators based on selection count and ranges
+            if (SelectedWeapons.Num() == 1)
+            {
+                FGameplayTag SlotTag = GameLogic::GetWeaponSlot(SelectedWeapons[0]);
+                
+                float WeaponRange = ShipComp.GetWeaponRange(SlotTag) * 10;
+
+                WeaponMinRangeIndicator.SetRadius(WeaponRange);
+                WeaponMinRangeIndicator.SetIndicatorVisibility(true);
+
+                DamageFalloffIndicator.SetRadius(WeaponRange + GameLogic::FalloffRange);
+                DamageFalloffIndicator.SetIndicatorVisibility(true);
+
+                WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
+            }
+            else // 2 or more weapons selected
+            {
+                float GlobalMinRange = MAX_flt;
+                float GlobalMaxRange = -1.0f;
+
+                for (int Index : SelectedWeapons)
+                {
+                    FGameplayTag SlotTag = GameLogic::GetWeaponSlot(Index);
+                    float WeaponRange = ShipComp.GetWeaponRange(SlotTag) * 10;
+
+                    if (WeaponRange < GlobalMinRange) GlobalMinRange = WeaponRange;
+                    if (WeaponRange > GlobalMaxRange) GlobalMaxRange = WeaponRange;
+                }
+
+                DamageFalloffIndicator.SetIndicatorVisibility(false);
+
+                // If all selected weapons have identical ranges
+                if (Math::Abs(GlobalMinRange - GlobalMaxRange) < 0.01f)
+                {
+                    WeaponMinRangeIndicator.SetRadius(GlobalMinRange);
+                    WeaponMinRangeIndicator.SetIndicatorVisibility(true);
+
+                    WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
+                }
+                else // Selected weapons have different ranges
+                {
+                    WeaponMinRangeIndicator.SetRadius(GlobalMinRange);
+                    WeaponMinRangeIndicator.SetIndicatorVisibility(true);
+
+                    WeaponMaxRangeIndicator.SetRadius(GlobalMaxRange);
+                    WeaponMaxRangeIndicator.SetIndicatorVisibility(true);
+                }
+            }
+            return true;
+        }
+
+        //Toggle all weapons back to their default state
+
+        for (int32 i = 0; i < ShipComp.WeaponOrders.Num(); i++)
+        {
+            switch (ShipComp.WeaponOrders[i].WeaponState)
+            {
+                case EWeaponState::Pressed:
+                {
+                    ShipComp.WeaponOrders[i].WeaponState = EWeaponState::Equipped;
+                    break;
+                }
+                default: break;
+            }
+        }
+        WeaponMinRangeIndicator.SetIndicatorVisibility(false);
+        WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
+        DamageFalloffIndicator.SetIndicatorVisibility(false);
+        PickupRangeIndicator.SetIndicatorVisibility(false);
+        RadarRangeIndicator.SetIndicatorVisibility(true);
+        return false;
     }
 
     
