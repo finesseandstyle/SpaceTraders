@@ -28,6 +28,31 @@ enum ETurnMovementType {
     Hyperjump
 }
 
+struct FWeaponOrderUI
+{
+    UPROPERTY() int WeaponIndex = -1;
+    UPROPERTY() UTexture2D WeaponIcon;
+
+    FWeaponOrderUI(int InWeaponIndex, UTexture2D InWeaponIcon)
+    {
+        WeaponIndex = InWeaponIndex;
+        WeaponIcon = InWeaponIcon;
+    }
+}
+
+struct FRemovedWeaponOrder
+{
+    UPROPERTY() int WeaponIndex = -1;
+    UPROPERTY() AGameObject PreviousTarget = nullptr;
+
+    FRemovedWeaponOrder(int InWeaponIndex, AGameObject InPreviousTarget)
+    {
+        WeaponIndex = InWeaponIndex;
+        PreviousTarget = InPreviousTarget;
+    }
+}
+
+
 event void FOnHoveredObjectChanged(AGameObject PreviousObject, AGameObject Object);
 
 class UTopDownPlannerComponent : UActorComponent
@@ -402,7 +427,7 @@ class UTopDownPlannerComponent : UActorComponent
     // true = list is not empty = start combat cursor mode
     // false = list is empty back to select cursor mode
     UFUNCTION()
-    bool SelectWeapon(int WeaponIndex) {
+    bool SelectWeapon(int WeaponIndex, FRemovedWeaponOrder&out RemovedWeaponOrder) {
         //toggle the selected index
         bool bToggledWeapon = false;
         switch (ShipComp.WeaponOrders[WeaponIndex].WeaponState)
@@ -416,6 +441,18 @@ class UTopDownPlannerComponent : UActorComponent
             case EWeaponState::Pressed:
             {
                 ShipComp.WeaponOrders[WeaponIndex].WeaponState = EWeaponState::Equipped;
+                bToggledWeapon = true;
+                break;
+            }
+            case EWeaponState::Targeting:
+            {
+                //cancel existing targeting
+                RemovedWeaponOrder.WeaponIndex = WeaponIndex;
+                RemovedWeaponOrder.PreviousTarget = ShipComp.WeaponOrders[WeaponIndex].Target;
+                ShipComp.WeaponOrders[WeaponIndex].Target = nullptr;
+                ShipComp.WeaponOrders[WeaponIndex].TargetRoot = nullptr;
+                
+                ShipComp.WeaponOrders[WeaponIndex].WeaponState = EWeaponState::Pressed;
                 bToggledWeapon = true;
                 break;
             }
@@ -534,8 +571,9 @@ class UTopDownPlannerComponent : UActorComponent
     }
 
     UFUNCTION()
-    bool ToggleAllWeapons()
+    bool ToggleAllWeapons(TArray<FRemovedWeaponOrder>&out RemovedWeaponOrders)
     {
+        RemovedWeaponOrders.Empty();
         int PressedWeapons = 0;
         int MaximumSelectableWeapons = 0;
         TArray<int> SelectedWeapons;
@@ -552,6 +590,15 @@ class UTopDownPlannerComponent : UActorComponent
                 case EWeaponState::Equipped:
                 {
                     MaximumSelectableWeapons++;
+                    break;
+                }
+                case EWeaponState::Targeting:
+                {
+                    //cancel existing targeting
+                    MaximumSelectableWeapons++;
+                    RemovedWeaponOrders.Add(FRemovedWeaponOrder(i, ShipComp.WeaponOrders[i].Target));
+                    ShipComp.WeaponOrders[i].Target = nullptr;
+                    ShipComp.WeaponOrders[i].TargetRoot = nullptr;
                     break;
                 }
                 default: break;
@@ -576,9 +623,18 @@ class UTopDownPlannerComponent : UActorComponent
                         SelectedWeapons.Add(i);
                         break;
                     }
+                    case EWeaponState::Targeting:
+                    {
+                        ShipComp.WeaponOrders[i].WeaponState = EWeaponState::Pressed;
+                        SelectedWeapons.Add(i);
+                        break;
+                    }
                     default: break;
                 }
             }
+            
+            RadarRangeIndicator.SetIndicatorVisibility(true);
+            PickupRangeIndicator.SetIndicatorVisibility(false);
             // Update weapon range indicators based on selection count and ranges
             if (SelectedWeapons.Num() == 1)
             {
@@ -631,26 +687,45 @@ class UTopDownPlannerComponent : UActorComponent
         }
 
         //Toggle all weapons back to their default state
+        DropFiringList();
+        return false;
+    }
 
+    //When we click on a target to assign the firing list
+    UFUNCTION()
+    TArray<FWeaponOrderUI> SubmitWeaponOrder(AGameObject Target)
+    {
+        TArray<FWeaponOrderUI> UIWeaponOrders;
         for (int32 i = 0; i < ShipComp.WeaponOrders.Num(); i++)
         {
             switch (ShipComp.WeaponOrders[i].WeaponState)
             {
                 case EWeaponState::Pressed:
                 {
-                    ShipComp.WeaponOrders[i].WeaponState = EWeaponState::Equipped;
+                    ShipComp.WeaponOrders[i].WeaponState = EWeaponState::Targeting;
+                    ShipComp.WeaponOrders[i].Target = Target;
+                    ShipComp.WeaponOrders[i].TargetRoot = Target.RootComponent;
+
+                    //Get Weapon Icon
+                    FGameplayTag WeaponSlot = GameLogic::GetWeaponSlot(i);
+                    FGameItem Weapon;
+                    if (ShipComp.EquipmentSlots.Find(WeaponSlot, Weapon))
+                        UIWeaponOrders.Add(FWeaponOrderUI(i, Weapon.ItemDefinition.Icon.Get()));
+                    
                     break;
                 }
                 default: break;
             }
         }
+        
         WeaponMinRangeIndicator.SetIndicatorVisibility(false);
         WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
         DamageFalloffIndicator.SetIndicatorVisibility(false);
-        PickupRangeIndicator.SetIndicatorVisibility(false);
-        RadarRangeIndicator.SetIndicatorVisibility(true);
-        return false;
+
+        return UIWeaponOrders;
     }
+
+    
 
     
 }

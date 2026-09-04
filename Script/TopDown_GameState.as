@@ -2,8 +2,8 @@ event void FOnTurnUpdate();
 event void FOnTurnResume();
 event void FOnTurnPaused();
 event void FOnTurnDurationChanged();
-event void FOnSmallObjectSpawned();
-event void FOnSmallObjectDestroyed();
+event void FOnSmallObjectSpawned(USceneComponent RootComponent, FGameplayTag ObjectType, FGameplayTag Race);
+event void FOnSmallObjectDestroyed(USceneComponent RootComponent);
 event void FOnGameStateInitialized();
 
 class ATopDown_GameState : AGameStateBase

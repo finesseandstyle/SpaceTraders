@@ -43,7 +43,7 @@ enum EWeaponFiringType
 struct FWeaponShot
 {
     UShipStateComponent Attacker;
-    UShipStateComponent Target;
+    AGameObject Target;
     USceneComponent SourceRoot, TargetRoot; //Both Required for beams, Target required for ballistic firing
     EWeaponFiringType FiringType; //Instant -> Attacker.FireWeaponAt; Ballistic->Projectile->Attacker.FireProjectileWeapon & Spawn Homing Projectile
     float Initiative;
@@ -55,7 +55,7 @@ struct FWeaponShot
         return FinalFireTime < Other.FinalFireTime;
     }
 
-    FWeaponShot(UShipStateComponent InAttacker, UShipStateComponent InTarget,
+    FWeaponShot(UShipStateComponent InAttacker, AGameObject InTarget,
                 USceneComponent InSourceRoot, USceneComponent InTargetRoot,
                 EWeaponFiringType InFiringType, float InInitiative, EWeaponState InWeaponState=EWeaponState::Unequipped)
     {
@@ -275,7 +275,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
     TArray<FWeaponShot> CalculateFiringTimeline(TArray<UShipStateComponent> ActiveShips)
     {
         TArray<FWeaponShot> PendingShots;
-        TMap<UShipStateComponent, int> TargetCounts;
+        TMap<AGameObject, int> TargetCounts;
 
         // 1. No gathering, individual ships add orders to the subsystem on their own
 
@@ -290,7 +290,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
 
         for (auto Kvp : TargetCounts)
         {
-            UShipStateComponent PinnedTarget = Kvp.Key;
+            AGameObject PinnedTarget = Kvp.Key;
             int AttackerCount = Kvp.Value;
 
             // Base timestamp for this specific engagement cluster

@@ -126,7 +126,7 @@ enum EWeaponState {
     Equipped,
     Broken,
     Disabled, //by debuffs for example
-    Pressed, //UI only for the player when they initially press a weapon before targeting
+    Pressed, //UI only for the player when they initially select a weapon before assigning to a target
     Targeting
 }
 
@@ -1108,6 +1108,18 @@ class UShipStateComponent : UActorComponent
         if (DamageType == GameplayTags::DamageType_Energy) return GameplayTags::SpaceShip_Stat_Positive_DamageEnergetic;
         if (DamageType == GameplayTags::DamageType_Explosive) return GameplayTags::SpaceShip_Stat_Positive_DamageExplosive;
         return FGameplayTag();
+    }
+
+    UFUNCTION()
+    void AssignFiringList(TArray<int> WeaponIndexes, AGameObject Target)
+    {
+        for (int WeaponIndex : WeaponIndexes)
+        {
+            FGameplayTag WeaponSlot = GameLogic::GetWeaponSlot(WeaponIndex);
+            WeaponOrders[WeaponIndex].Target = Target;
+            WeaponOrders[WeaponIndex].TargetRoot = Target.RootComponent;
+        }
+
     }
 
     // ==================================================================
