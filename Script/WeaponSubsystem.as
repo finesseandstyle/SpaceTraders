@@ -40,15 +40,24 @@ enum EWeaponFiringType
     Ballistic
 }
 
+enum EWeaponState {
+    Unequipped,
+    Equipped,
+    Broken,
+    Disabled, //by debuffs for example
+    Pressed, //UI only for the player when they initially select a weapon before assigning to a target
+    Targeting
+}
+
 struct FWeaponShot
 {
-    UShipStateComponent Attacker;
-    AGameObject Target;
-    USceneComponent SourceRoot, TargetRoot; //Both Required for beams, Target required for ballistic firing
-    EWeaponFiringType FiringType; //Instant -> Attacker.FireWeaponAt; Ballistic->Projectile->Attacker.FireProjectileWeapon & Spawn Homing Projectile
-    float Initiative;
-    float FinalFireTime;
-    EWeaponState WeaponState;
+    UPROPERTY() UShipStateComponent Attacker;
+    UPROPERTY() AGameObject Target;
+    UPROPERTY() USceneComponent SourceRoot, TargetRoot; //Both Required for beams, Target required for ballistic firing
+    UPROPERTY() EWeaponFiringType FiringType; //Instant -> Attacker.FireWeaponAt; Ballistic->Projectile->Attacker.FireProjectileWeapon & Spawn Homing Projectile
+    UPROPERTY() float Initiative;
+    UPROPERTY() float FinalFireTime;
+    UPROPERTY() EWeaponState WeaponState;
 
     bool opCmp(const FWeaponShot& Other) const
     {
@@ -70,11 +79,29 @@ struct FWeaponShot
 
 };
 
+struct FWeaponSpawningRuleRow
+{
+    UPROPERTY() UStaticMesh ProjectileMesh;
+    UPROPERTY() UNiagaraSystem ShotNS;
+    UPROPERTY() UNiagaraSystem ImpactNS;
+}
+
 class UWeaponSubsystem : UScriptWorldSubsystem
 {
     private TArray<FPendingVfxProjectile> ActiveShots;
     private TArray<FPendingVfxBeam> ActiveBeams;
     private float TurnDuration = 4.0;
+
+    UPROPERTY() UDataTable WeaponSpawningRules;
+
+
+    UFUNCTION()
+    void FireProjectileFromName(FName RowName, FVector MuzzleLocation, USceneComponent TargetRootComponent, FVector OffsetPosition)
+    {
+        FWeaponSpawningRuleRow Row;
+        WeaponSpawningRules.FindRow(RowName, Row);
+        FireProjectile(Row.ShotNS, Row.ImpactNS, MuzzleLocation, TargetRootComponent, OffsetPosition);
+    }
 
     UFUNCTION()
     void FireProjectile(
@@ -116,6 +143,15 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         }
 
         ActiveShots.Add(NewShot);
+    }
+
+    UFUNCTION()
+    void FireBeamFromName(FName RowName, USceneComponent SourceRootComponent, 
+        USceneComponent TargetRootComponent, FVector OffsetPosition)
+    {
+        FWeaponSpawningRuleRow Row;
+        WeaponSpawningRules.FindRow(RowName, Row);
+        FireBeam(Row.ShotNS, Row.ImpactNS, SourceRootComponent, TargetRootComponent, OffsetPosition);
     }
 
     UFUNCTION()
@@ -186,6 +222,27 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         NewBeam.ElapsedTime = 0.0;
 
         ActiveBeams.Add(NewBeam);
+    }
+
+    UFUNCTION()
+    void FireBallisticProjectile(FName RowName, FGameplayTag WeaponSlot, AGameObject Attacker, USceneComponent TargetRootComponent)
+    {
+        FWeaponSpawningRuleRow Row;
+        WeaponSpawningRules.FindRow(RowName, Row);
+        UShipStateComponent Stats = Attacker.GetComponentByClass(UShipStateComponent);
+        FProjectileDamageSpec Damage2;
+        Stats.FireProjectileWeapon(WeaponSlot, TargetRootComponent, Damage2);
+        UTurnBasedMovementComponent MoveComp = Attacker.GetComponentByClass(UTurnBasedMovementComponent);
+
+        ABallisticProjectile Projectile = SpawnActor(ABallisticProjectile, Attacker.ActorLocation, Attacker.ActorRotation, bDeferredSpawn = true);
+        Projectile.Owner = Attacker;
+        Projectile.ProjectileMesh.SetStaticMesh(Row.ProjectileMesh);
+        Projectile.Damage = Damage2;
+        Projectile.ImpactNS = Row.ImpactNS;
+        Projectile.ExhaustNS.SetAsset(Row.ShotNS);
+        Projectile.InheritedSpeed = MoveComp.GetInstantSpeed() * 0.265 + 200.0; //weird conversion between UTurnBasedMovement's speed and real UU speed
+        FinishSpawningActor(Projectile);
+
     }
 
     UFUNCTION(BlueprintOverride)

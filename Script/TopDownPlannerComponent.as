@@ -57,6 +57,8 @@ event void FOnHoveredObjectChanged(AGameObject PreviousObject, AGameObject Objec
 
 class UTopDownPlannerComponent : UActorComponent
 {
+    UPROPERTY() UNiagaraComponent DamageNumbersNS;
+
     UPROPERTY() FOnHoveredObjectChanged OnHoveredObjectChanged;
 
     UPROPERTY() FVector PlayfieldLocation; //Should be aligned with GameState's MaxZPlane
@@ -190,7 +192,7 @@ class UTopDownPlannerComponent : UActorComponent
         bHasResult = GameMath::GetPlayfieldLocation(Gameplay::GetPlayerController(0), PlayfieldLocation);
         
         GameMath::GetObjectAtCursorLocation(PlayfieldLocation, Params, HoveredObject);
-
+    
         //Print(f"{System::GetDisplayName(HoveredObject)}", 0);
         
         //Ignore all objects if mouse is hovering over the UI
@@ -209,7 +211,7 @@ class UTopDownPlannerComponent : UActorComponent
             CurrentHoveredObject = HoveredObject;
         }
     }
-
+    
     UFUNCTION()
     EInteractionResult GetInteractedObject() {
         if (!bHasResult)
@@ -217,6 +219,8 @@ class UTopDownPlannerComponent : UActorComponent
 
         if (HoveredObject == nullptr || Stars.Contains(HoveredObject))
             return EInteractionResult::OnPlayfield;
+
+        Print(f"Distance: {HoveredObject.ActorLocation.Dist2D(PlayerShip.ActorLocation)}", 2);
 
         if (HoveredObject == PlayerShip)
             return EInteractionResult::OnSelf;
@@ -571,6 +575,17 @@ class UTopDownPlannerComponent : UActorComponent
     }
 
     UFUNCTION()
+    bool CheckTargetHasOrders(AGameObject Object)
+    {
+        for (FWeaponShot WeaponOrder : ShipComp.WeaponOrders)
+        {
+            if (WeaponOrder.Target == Object)
+                return true;
+        }
+        return false;
+    }
+
+    UFUNCTION()
     bool ToggleAllWeapons(TArray<FRemovedWeaponOrder>&out RemovedWeaponOrders)
     {
         RemovedWeaponOrders.Empty();
@@ -725,7 +740,15 @@ class UTopDownPlannerComponent : UActorComponent
         return UIWeaponOrders;
     }
 
-    
+    UFUNCTION()
+    void DisplayDamageNumbers(FVector InWorldLocation, float InDamage)
+    {
+        DamageNumbersNS.SetWorldLocation(InWorldLocation);
+        DamageNumbersNS.Activate();
+        TArray<FVector4> LocCurrentNumbers = NiagaraDataInterfaceArray::GetNiagaraArrayVector4(DamageNumbersNS, n"User.DamageInfo");
+        LocCurrentNumbers.Add(FVector4(InWorldLocation.X, InWorldLocation.Y, InWorldLocation.Z, InDamage));
+        NiagaraDataInterfaceArray::SetNiagaraArrayVector4(DamageNumbersNS, n"User.DamageInfo", LocCurrentNumbers);
+    }
 
     
 }

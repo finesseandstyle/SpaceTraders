@@ -121,15 +121,6 @@ struct FProjectileDamageSpec
     }
 }
 
-enum EWeaponState {
-    Unequipped,
-    Equipped,
-    Broken,
-    Disabled, //by debuffs for example
-    Pressed, //UI only for the player when they initially select a weapon before assigning to a target
-    Targeting
-}
-
 class UShipStateComponent : UActorComponent
 {
     UPROPERTY() FGameplayTag Faction;
@@ -461,7 +452,7 @@ class UShipStateComponent : UActorComponent
             if (Fragment == nullptr)
                 continue;
 
-            Fragment.RecalculateStats();
+            Fragment.RecalculateStats(); //might not be needed
 
             for (const auto& Stat : Fragment.Stats)
             {

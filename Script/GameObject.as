@@ -1,8 +1,8 @@
 class AGameObject : APawn
 {
-    UPROPERTY(DefaultComponent, RootComponent) 
-    USphereComponent Sphere;
+    UPROPERTY(DefaultComponent, RootComponent) USphereComponent Sphere;
     default Sphere.SphereRadius = 120;
+    //Might need a Faction variable here instead of it residing on ShipStateComponent, could be hand
 
     UPROPERTY()//ExposeOnSpawn)
     FGameplayTag ObjectType = GameplayTags::GameObject_Ship;
