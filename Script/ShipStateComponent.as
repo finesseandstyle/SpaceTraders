@@ -158,8 +158,8 @@ class UShipStateComponent : UActorComponent
         EquipmentSlots.Add(GameplayTags::SpaceShip_Equipment_Hull, FGameItem());
         for (int32 i = 0; i < 6; i++)
         {
-            WeaponOrders.Add(FWeaponShot(this, nullptr, this.GetOwner().RootComponent, 
-            nullptr, EWeaponFiringType::Projectile, 30));
+            WeaponOrders.Add(FWeaponShot(GameLogic::GetWeaponSlot(i), n"Beam", this, nullptr, this.GetOwner().RootComponent, 
+            nullptr, EWeaponFiringType::Beam, 30));
         }
     }
 
@@ -894,6 +894,7 @@ class UShipStateComponent : UActorComponent
     UFUNCTION()
     void AdvanceTurn()
     {
+        CheckValidWeaponOrders();
         RecalculateShipStatsIfDirty();
 
         //Heat Dissipation
@@ -933,6 +934,18 @@ class UShipStateComponent : UActorComponent
         if (bChangedLoadout)
         {
             bChangedLoadout = false;
+        }
+    }
+
+    UFUNCTION()
+    void CheckValidWeaponOrders()
+    {
+        for (FWeaponShot& WeaponOrder : WeaponOrders)
+        {
+            if (!IsValid(WeaponOrder.Target) && WeaponOrder.WeaponState == EWeaponState::Targeting)
+            {
+                WeaponOrder.WeaponState = EWeaponState::Equipped; //Reset to default, might not be Equipped
+            }
         }
     }
 
@@ -1027,7 +1040,7 @@ class UShipStateComponent : UActorComponent
     
 
     UFUNCTION()
-        bool FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target, float&out TotalDamage=0.0)
+    bool FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target, float&out TotalDamage=0.0)
     {
         UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);
         //TODO: Implement Max range check

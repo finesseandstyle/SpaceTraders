@@ -49,8 +49,17 @@ enum EWeaponState {
     Targeting
 }
 
+
+struct FWeaponShotCluster
+{
+    TArray<FWeaponShot> Shots;
+}
+
 struct FWeaponShot
 {
+    UPROPERTY() FGameplayTag WeaponSlot;
+    UPROPERTY() FName WeaponName;
+
     UPROPERTY() UShipStateComponent Attacker;
     UPROPERTY() AGameObject Target;
     UPROPERTY() USceneComponent SourceRoot, TargetRoot; //Both Required for beams, Target required for ballistic firing
@@ -64,10 +73,12 @@ struct FWeaponShot
         return FinalFireTime < Other.FinalFireTime;
     }
 
-    FWeaponShot(UShipStateComponent InAttacker, AGameObject InTarget,
+    FWeaponShot(FGameplayTag InWeaponSlot, FName InWeaponName, UShipStateComponent InAttacker, AGameObject InTarget,
                 USceneComponent InSourceRoot, USceneComponent InTargetRoot,
                 EWeaponFiringType InFiringType, float InInitiative, EWeaponState InWeaponState=EWeaponState::Unequipped)
     {
+        WeaponSlot = InWeaponSlot;
+        WeaponName = InWeaponName;
         Attacker = InAttacker;
         Target = InTarget;
         SourceRoot = InSourceRoot;
@@ -88,23 +99,42 @@ struct FWeaponSpawningRuleRow
 
 class UWeaponSubsystem : UScriptWorldSubsystem
 {
-    private TArray<FPendingVfxProjectile> ActiveShots;
-    private TArray<FPendingVfxBeam> ActiveBeams;
+    private TArray<FPendingVfxProjectile> ActiveVFXShots;
+    private TArray<FPendingVfxBeam> ActiveVFXBeams;
     private float TurnDuration = 4.0;
 
     UPROPERTY() UDataTable WeaponSpawningRules;
 
+    private TArray<FWeaponShot> Timeline;
+    private float ElapsedTurnTime = 0.0;
+    private int32 NextShotIndex = 0;
+    private bool bTurnActive = false;
+
 
     UFUNCTION()
-    void FireProjectileFromName(FName RowName, FVector MuzzleLocation, USceneComponent TargetRootComponent, FVector OffsetPosition)
+    void FireInstantProjectile(FName RowName, FGameplayTag WeaponSlot, FVector MuzzleLocation, AGameObject Attacker, AGameObject Defender, FVector OffsetPosition)
     {
         FWeaponSpawningRuleRow Row;
         WeaponSpawningRules.FindRow(RowName, Row);
-        FireProjectile(Row.ShotNS, Row.ImpactNS, MuzzleLocation, TargetRootComponent, OffsetPosition);
+        UShipStateComponent Stats = Attacker.GetComponentByClass(UShipStateComponent);
+
+        if (Defender.ObjectType == GameplayTags::GameObject_Ship)
+        {
+            float Damage;
+            Stats.FireWeaponAt(WeaponSlot, nullptr, Damage);
+        }
+        else if (Defender.ObjectType == GameplayTags::GameObject_Loot)
+        {
+            Defender.DestroyActor(); //any instance of damage against Loot will destroy it
+        }
+        else if (Defender.ObjectType == GameplayTags::GameObject_Projectile)
+        {
+            //Projectiles have their own simplified health
+        }
+        FireProjectile(Row.ShotNS, Row.ImpactNS, MuzzleLocation, Defender.RootComponent, OffsetPosition);
     }
 
-    UFUNCTION()
-    void FireProjectile(
+    private void FireProjectile(
         UNiagaraSystem TracerVfx, 
         UNiagaraSystem ImpactVfx,
         FVector MuzzleLocation, 
@@ -142,20 +172,36 @@ class UWeaponSubsystem : UScriptWorldSubsystem
             NewShot.NiagaraComponent.AdvanceSimulation(1, 0.01);
         }
 
-        ActiveShots.Add(NewShot);
+        ActiveVFXShots.Add(NewShot);
     }
 
     UFUNCTION()
-    void FireBeamFromName(FName RowName, USceneComponent SourceRootComponent, 
-        USceneComponent TargetRootComponent, FVector OffsetPosition)
+    void FireBeam(FName RowName, FGameplayTag WeaponSlot, AGameObject Attacker,
+        AGameObject Defender, FVector OffsetPosition)
     {
         FWeaponSpawningRuleRow Row;
         WeaponSpawningRules.FindRow(RowName, Row);
-        FireBeam(Row.ShotNS, Row.ImpactNS, SourceRootComponent, TargetRootComponent, OffsetPosition);
+
+        if (Defender.ObjectType == GameplayTags::GameObject_Ship)
+        {
+            float Damage;
+            UShipStateComponent Stats = Defender.GetComponentByClass(UShipStateComponent);
+            Stats.FireWeaponAt(WeaponSlot, Stats, Damage);
+            UTopDownPlannerComponent Planner = Gameplay::GetPlayerController(0).GetComponentByClass(UTopDownPlannerComponent);
+
+            if (Planner != nullptr)
+                Planner.DisplayDamageNumbers(Defender.ActorLocation + OffsetPosition, Damage);
+        }
+        else if (Defender.ObjectType == GameplayTags::GameObject_Loot || Defender.ObjectType == GameplayTags::GameObject_Projectile)
+        {
+            Defender.DestroyActor(); //any instance of damage against Loot will destroy it
+            //TODO: Projectiles have their own simplified health
+        }
+        
+        FireBeam2(Row.ShotNS, Row.ImpactNS, Attacker.RootComponent, Defender.RootComponent, OffsetPosition);
     }
 
-    UFUNCTION()
-    void FireBeam(
+    private void FireBeam2(
         UNiagaraSystem BeamVfx,
         UNiagaraSystem ImpactVfx,
         USceneComponent SourceRootComponent,
@@ -221,7 +267,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         NewBeam.Duration = Duration;
         NewBeam.ElapsedTime = 0.0;
 
-        ActiveBeams.Add(NewBeam);
+        ActiveVFXBeams.Add(NewBeam);
     }
 
     UFUNCTION()
@@ -240,18 +286,20 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         Projectile.Damage = Damage2;
         Projectile.ImpactNS = Row.ImpactNS;
         Projectile.ExhaustNS.SetAsset(Row.ShotNS);
-        Projectile.InheritedSpeed = MoveComp.GetInstantSpeed() * 0.265 + 200.0; //weird conversion between UTurnBasedMovement's speed and real UU speed
+        //UTurnBasedMovement's Speed = 1 / ~0.265 real UU Speed, idk why
+        Projectile.InheritedSpeed = MoveComp.GetInstantSpeed() * 0.265 + 200.0;  //slightly faster than the attacker
         FinishSpawningActor(Projectile);
 
     }
 
+    //Tickable structs where we manually control their lifetimes
     UFUNCTION(BlueprintOverride)
     void Tick(float DeltaTime)
     {
         //Projectiles
-        for (int32 i = ActiveShots.Num() - 1; i >= 0; --i)
+        for (int32 i = ActiveVFXShots.Num() - 1; i >= 0; --i)
         {
-            FPendingVfxProjectile& Shot = ActiveShots[i];
+            FPendingVfxProjectile& Shot = ActiveVFXShots[i];
 
             const float FullStep = DefaultProjectileSpeed * DeltaTime;
             const FVector TargetLocation = Shot.TargetRoot.WorldLocation + Shot.OffsetPosition;
@@ -286,7 +334,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
                     );
                 }
 
-                ActiveShots.RemoveAtSwap(i);
+                ActiveVFXShots.RemoveAtSwap(i);
             }
             else
             {
@@ -303,9 +351,9 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         }
 
         //Projectile "Water Jet" style Beams
-        for (int32 i = ActiveBeams.Num() - 1; i >= 0; --i)
+        for (int32 i = ActiveVFXBeams.Num() - 1; i >= 0; --i)
         {
-            FPendingVfxBeam& Beam = ActiveBeams[i];
+            FPendingVfxBeam& Beam = ActiveVFXBeams[i];
             Beam.ElapsedTime += DeltaTime;
 
             if (!(Beam.TargetRoot != nullptr && Beam.SourceRoot != nullptr) || Beam.ElapsedTime >= Beam.Duration)
@@ -320,66 +368,272 @@ class UWeaponSubsystem : UScriptWorldSubsystem
                     Beam.ImpactTemplateNS.Deactivate();
                 }
 
-                ActiveBeams.RemoveAtSwap(i);
+                ActiveVFXBeams.RemoveAtSwap(i);
                 continue;
             }
 
             Beam.LaserTemplateNS.SetVectorParameter(n"BeamStart", Beam.SourceRoot.WorldLocation);
             Beam.LaserTemplateNS.SetVectorParameter(n"BeamEnd", Beam.TargetRoot.WorldLocation + Beam.OffsetPosition);
         }
-    }
 
-    TArray<FWeaponShot> CalculateFiringTimeline(TArray<UShipStateComponent> ActiveShips)
-    {
-        TArray<FWeaponShot> PendingShots;
-        TMap<AGameObject, int> TargetCounts;
+        if (!bTurnActive)
+            return;
 
-        // 1. No gathering, individual ships add orders to the subsystem on their own
+        ElapsedTurnTime += DeltaTime;
 
-        // 2. Calculate execution timeline based on target groupings
-        int TotalEngagedTargets = TargetCounts.Num();
-        
-        // Distribute independent engagements evenly across the turn
-        float SpreadInterval = TurnDuration / Math::Max(1, TotalEngagedTargets);
-        int CurrentPairIndex = 0;
-
-        TArray<FWeaponShot> FinalTimeline;
-
-        for (auto Kvp : TargetCounts)
+        while (NextShotIndex < Timeline.Num() && Timeline[NextShotIndex].FinalFireTime <= ElapsedTurnTime)
         {
-            AGameObject PinnedTarget = Kvp.Key;
-            int AttackerCount = Kvp.Value;
-
-            // Base timestamp for this specific engagement cluster
-            float ClusterStartTime = CurrentPairIndex * SpreadInterval;
-
-            // Swarm vs Duel Logic:
-            // If many attackers (Swarm), TimeWindow shrinks, causing a rapid burst.
-            // If 1v1 (Duel), TimeWindow utilizes the full interval, spreading shots out.
-            float BurstCompression = 1.0 / float(AttackerCount);
-            float TimeWindow = SpreadInterval * BurstCompression;
-
-            // 3. Apply Initiative within the dynamically scaled time window
-            for (int i = PendingShots.Num() - 1; i >= 0; i--)
-            {
-                if (PendingShots[i].Target == PinnedTarget)
-                {
-                    FWeaponShot FinalShot = PendingShots[i];
-                    
-                    // The weapon's initiative determines exactly when it fires inside the cluster
-                    float InitiativeOffset = FinalShot.Initiative * TimeWindow;
-                    FinalShot.FinalFireTime = ClusterStartTime + InitiativeOffset;
-                    
-                    FinalTimeline.Add(FinalShot);
-                    PendingShots.RemoveAt(i);
-                }
-            }
-            
-            CurrentPairIndex++;
+            ExecuteShot(Timeline[NextShotIndex]);
+            NextShotIndex++;
         }
 
-        // 4. Sort the completed timeline chronologically for the execution manager
-        FinalTimeline.Sort();
+        if (NextShotIndex >= Timeline.Num())
+        {
+            bTurnActive = false;
+            // TODO: broadcast an OnTurnResolved event/delegate here so
+            // whatever owns the turn loop knows it's safe to advance.
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Call once per turn, after every ship has submitted its WeaponOrders.
+    // ------------------------------------------------------------------
+    UFUNCTION()
+    void BeginTurn()
+    {
+        Timeline = BuildTimeline();
+        ElapsedTurnTime = 0.0;
+        NextShotIndex = 0;
+        bTurnActive = Timeline.Num() > 0;
+    }
+
+    UFUNCTION()
+    bool IsTurnResolved() const
+    {
+        return !bTurnActive;
+    }
+
+    // ------------------------------------------------------------------
+    // Step 1: gather every active FWeaponShot order for this turn.
+    // (This is your commented-out scaffold, filled in.)
+    // ------------------------------------------------------------------
+    private TArray<FWeaponShot> GatherActiveShots() const
+    {
+        TArray<FWeaponShot> ActiveShots;
+
+        ATopDown_GameState GameState = Cast<ATopDown_GameState>(Gameplay::GetGameState());
+        if (GameState == nullptr)
+            return ActiveShots;
+
+        for (AGameObject Ship : GameState.GameObjects)
+        {
+            if (Ship == nullptr)
+                continue;
+
+            UShipStateComponent AttackerState = Ship.GetComponentByClass(UShipStateComponent);
+            if (AttackerState == nullptr)
+                continue;
+
+            for (FWeaponShot Shot : AttackerState.WeaponOrders)
+            {
+                if (Shot.WeaponState == EWeaponState::Targeting && Shot.Target != nullptr)
+                    ActiveShots.Add(Shot);
+            }
+        }
+
+        return ActiveShots;
+    }
+
+    // ------------------------------------------------------------------
+    // Steps 2-4: build the combat graph, cluster it, resolve per-cluster
+    // timing from Initiative, then merge everything into one global,
+    // chronologically-sorted timeline.
+    // ------------------------------------------------------------------
+    private TArray<FWeaponShot> BuildTimeline() const
+    {
+        TArray<FWeaponShot> AllShots = GatherActiveShots();
+
+        TArray<FWeaponShot> FinalTimeline;
+        if (AllShots.Num() == 0)
+            return FinalTimeline;
+
+        // --- Union-Find over every ship that appears as attacker or target ---
+        TMap<UObject, int32> NodeIndex;
+        TArray<int32> Parent;
+
+        for (FWeaponShot Shot : AllShots)
+        {
+            UObject AttackerNode = GetAttackerNode(Shot);
+            EnsureNode(AttackerNode, NodeIndex, Parent);
+
+            if (Shot.Target != nullptr)
+            {
+                EnsureNode(Shot.Target, NodeIndex, Parent);
+                if (AttackerNode != nullptr)
+                    UnionNodes(Parent, NodeIndex[AttackerNode], NodeIndex[Shot.Target]);
+            }
+        }
+
+        // --- Group shots by cluster root, tracking unique roots as we go ---
+        TMap<int32, FWeaponShotCluster> Clusters;
+        TArray<int32> ClusterRoots;
+
+        for (FWeaponShot Shot : AllShots)
+        {
+            UObject AttackerNode = GetAttackerNode(Shot);
+            if (AttackerNode == nullptr || !NodeIndex.Contains(AttackerNode))
+                continue; // no attacker identity to cluster on -- malformed order
+
+            int32 RootIdx = FindRoot(Parent, NodeIndex[AttackerNode]);
+
+            if (!Clusters.Contains(RootIdx))
+            {
+                Clusters.Add(RootIdx, FWeaponShotCluster());
+                ClusterRoots.Add(RootIdx);
+            }
+
+            Clusters[RootIdx].Shots.Add(Shot);
+        }
+
+        // --- Step 3: resolve firing order + timing within each cluster ---
+        for (int32 Root : ClusterRoots)
+        {
+            FWeaponShotCluster Cluster = Clusters[Root];
+            SortByInitiativeDescending(Cluster.Shots);
+
+            const int32 Count = Cluster.Shots.Num();
+            for (int32 i = 0; i < Count; i++)
+            {
+                FWeaponShot TimedShot = Cluster.Shots[i];
+
+                // Spread this cluster's shots evenly across the turn window.
+                // Same-rank shots in equal-sized clusters land on the same
+                // timestamp by construction -- that's what keeps unrelated
+                // duels executing in lockstep, while a cluster's internal
+                // order stays strictly Initiative-ordered.
+                //
+                // Divide by Count (not Count - 1): this reserves one extra,
+                // unused slot at rank == Count (i.e. at exactly TurnDuration)
+                // so the last real shot never lands right on the turn
+                // boundary. E.g. 4 weapons -> 0.0, 0.25, 0.5, 0.75, with
+                // 1.0 left empty.
+                TimedShot.FinalFireTime = (float(i) / float(Count)) * TurnDuration;
+
+                FinalTimeline.Add(TimedShot);
+            }
+        }
+
+        // --- Step 4: merge everything into one global chronological timeline ---
+        SortByFinalFireTimeAscending(FinalTimeline);
         return FinalTimeline;
+    }
+
+    private UObject GetAttackerNode(const FWeaponShot& Shot) const
+    {
+        if (Shot.Attacker == nullptr)
+            return nullptr;
+        return Shot.Attacker.Owner; // owning ship actor -- must match Shot.Target's identity
+    }
+
+    // ------------------------------------------------------------------
+    // Union-Find helpers
+    // ------------------------------------------------------------------
+    private void EnsureNode(UObject Node, TMap<UObject, int32>& NodeIndex, TArray<int32>& Parent) const
+    {
+        if (Node == nullptr || NodeIndex.Contains(Node))
+            return;
+
+        int32 NewIndex = Parent.Num();
+        NodeIndex.Add(Node, NewIndex);
+        Parent.Add(NewIndex); // self-parent = own root
+    }
+
+    private int32 FindRoot(TArray<int32>& Parent, int32& X) const
+    {
+        while (Parent[X] != X)
+        {
+            Parent[X] = Parent[Parent[X]]; // path compression
+            X = Parent[X];
+        }
+        return X;
+    }
+
+    private void UnionNodes(TArray<int32>& Parent, int32& A, int32& B) const
+    {
+        int32 RootA = FindRoot(Parent, A);
+        int32 RootB = FindRoot(Parent, B);
+        if (RootA != RootB)
+            Parent[RootA] = RootB;
+    }
+
+    // ------------------------------------------------------------------
+    // Plain insertion sorts. Per-turn shot counts are small, so O(n^2) is
+    // a non-issue -- swap for a predicate-based TArray::Sort() if your
+    // AngelScript build exposes one.
+    // ------------------------------------------------------------------
+    private void SortByInitiativeDescending(TArray<FWeaponShot>& Shots) const
+    {
+        for (int32 i = 1; i < Shots.Num(); i++)
+        {
+            FWeaponShot Key = Shots[i];
+            int32 j = i - 1;
+            while (j >= 0 && Shots[j].Initiative < Key.Initiative)
+            {
+                Shots[j + 1] = Shots[j];
+                j--;
+            }
+            Shots[j + 1] = Key;
+        }
+    }
+
+    private void SortByFinalFireTimeAscending(TArray<FWeaponShot>& Shots) const
+    {
+        for (int32 i = 1; i < Shots.Num(); i++)
+        {
+            FWeaponShot Key = Shots[i];
+            int32 j = i - 1;
+            while (j >= 0 && Shots[j].FinalFireTime > Key.FinalFireTime)
+            {
+                Shots[j + 1] = Shots[j];
+                j--;
+            }
+            Shots[j + 1] = Key;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Step 5: dispatch each shot to the right WeaponSubsystem call.
+    // See the note below the file for why the actual calls are commented.
+    // ------------------------------------------------------------------
+    private void ExecuteShot(FWeaponShot Shot)
+    {
+        AGameObject AttackerObject = Cast<AGameObject>(GetAttackerNode(Shot));
+        AGameObject DefenderObject = Cast<AGameObject>(Shot.Target);
+
+        //Won't target invalid objects
+        if (!IsValid(DefenderObject))
+            return;
+
+        float OffsetMax = 75;
+        FVector Offset = FVector(Math::RandRange(0, OffsetMax), Math::RandRange(0, OffsetMax), Math::RandRange(0, OffsetMax));
+        
+
+        switch (Shot.FiringType)
+        {
+            case EWeaponFiringType::Projectile:
+                FireInstantProjectile(Shot.WeaponName, Shot.WeaponSlot, Shot.SourceRoot.WorldLocation, AttackerObject, DefenderObject, Offset);
+                break;
+
+            case EWeaponFiringType::Beam:
+                FireBeam(Shot.WeaponName, Shot.WeaponSlot, AttackerObject, DefenderObject, Offset);
+                break;
+
+            case EWeaponFiringType::Ballistic:
+                FireBallisticProjectile(Shot.WeaponName, Shot.WeaponSlot, AttackerObject, Shot.TargetRoot);
+                break;
+
+            default:
+                break;
+        }
     }
 }

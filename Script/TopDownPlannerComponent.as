@@ -220,7 +220,7 @@ class UTopDownPlannerComponent : UActorComponent
         if (HoveredObject == nullptr || Stars.Contains(HoveredObject))
             return EInteractionResult::OnPlayfield;
 
-        Print(f"Distance: {HoveredObject.ActorLocation.Dist2D(PlayerShip.ActorLocation)}", 2);
+        //Print(f"Distance: {HoveredObject.ActorLocation.Dist2D(PlayerShip.ActorLocation)}", 2);
 
         if (HoveredObject == PlayerShip)
             return EInteractionResult::OnSelf;
