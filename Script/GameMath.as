@@ -109,14 +109,14 @@ namespace GameMath
     {
         FVector2D Temp, QuadrantTemp;
         FVector2D ViewportSize = WidgetLayout::GetViewportSize();
-        WidgetLayout::ProjectWorldLocationToWidgetPosition(PlayerController, WorldLocation, Temp, false);
-        Gameplay::ProjectWorldToScreen(PlayerController, WorldLocation, QuadrantTemp);
+        WidgetLayout::ProjectWorldLocationToWidgetPosition(PlayerController, WorldLocation, Temp, true);
+        Gameplay::ProjectWorldToScreen(PlayerController, WorldLocation, QuadrantTemp, true);
         float X = Math::Clamp(Temp.X, 0, ViewportSize.X);
         float Y = Math::Clamp(Temp.Y, 0, ViewportSize.Y);
 
         ScreenPosition = FVector2D(X, Y); //Tooltip position needs Widget Projection while quadrants need normal projection idk why
-        int Row = Math::FloorToInt(QuadrantTemp.X / ViewportSize.X * 3.0); 
-        int Col = Math::FloorToInt(QuadrantTemp.Y / ViewportSize.Y * 3.0);
+        int Row = Math::Clamp(Math::FloorToInt(QuadrantTemp.X / ViewportSize.X * 3.0), 0, 2);
+        int Col = Math::Clamp(Math::FloorToInt(QuadrantTemp.Y / ViewportSize.Y * 3.0), 0, 2);
         Alignment = GetToolTipAlignment(Row + Col * 3);
     }
 
