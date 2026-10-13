@@ -332,7 +332,7 @@ namespace GameLogic
 
     //Returns true if the Target is within Distance units from the Source
     UFUNCTION(BlueprintPure)
-    bool IsWithinDistance(FVector Source, FVector Target, float Distance)
+    bool IsInRange(FVector Source, FVector Target, float Distance)
     {
         float DistanceSquared = Distance * Distance;
         return Source.DistSquared2D(Target) <= DistanceSquared;

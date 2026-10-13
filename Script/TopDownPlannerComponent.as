@@ -741,6 +741,25 @@ class UTopDownPlannerComponent : UActorComponent
     }
 
     UFUNCTION()
+    TArray<UTexture2D> GetWeaponIcons()
+    {
+        TArray<UTexture2D> Icons;
+        
+        for (int32 i = 0; i < ShipComp.WeaponOrders.Num(); i++)
+        {
+            //Get Weapon Icon
+            FGameplayTag WeaponSlot = GameLogic::GetWeaponSlot(i);
+            FGameItem Weapon;
+            if (ShipComp.EquipmentSlots.Find(WeaponSlot, Weapon))
+                Icons.Add(Weapon.ItemDefinition.Icon.Get());
+            else 
+                Icons.Add(nullptr);
+        }
+
+        return Icons;
+    }
+
+    UFUNCTION()
     void DisplayDamageNumbers(FVector InWorldLocation, float InDamage)
     {
         DamageNumbersNS.SetWorldLocation(InWorldLocation);

@@ -14,15 +14,18 @@ class ABallisticProjectile : AGameObject
     default Sphere.SetCollisionResponseToChannel(ECollisionChannel::ECC_Destructible,   ECollisionResponse::ECR_Overlap);
     default Sphere.SetCollisionResponseToChannel(ECollisionChannel::Projectile,         ECollisionResponse::ECR_Ignore);
 
+    //Missile
     UPROPERTY(DefaultComponent, Attach = Sphere)   UStaticMeshComponent ProjectileMesh;
     default ProjectileMesh.RelativeScale3D = FVector(2.0);
     default ProjectileMesh.ComponentTags.Add(n"MainMesh");
     default ProjectileMesh.SetLightingChannels(false, true, false);
 
+    //Trail
     UPROPERTY(DefaultComponent, Attach = ProjectileMesh) UNiagaraComponent ExhaustNS;
     default ExhaustNS.RelativeLocation = FVector(-11, 0.0, 0.0);
     default ExhaustNS.AutoActivate = false;
 
+    //Movement Component
     UPROPERTY(DefaultComponent) UBHP_MissileMovementComponent BallisticMovement;
     default BallisticMovement.bAutoIgniteRocketMotor = false;
     default BallisticMovement.HomingRotationInterpSpeed = 9.0;

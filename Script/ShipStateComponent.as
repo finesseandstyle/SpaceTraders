@@ -159,7 +159,7 @@ class UShipStateComponent : UActorComponent
         for (int32 i = 0; i < 6; i++)
         {
             WeaponOrders.Add(FWeaponShot(GameLogic::GetWeaponSlot(i), n"Beam", this, nullptr, this.GetOwner().RootComponent, 
-            nullptr, EWeaponFiringType::Beam, 30));
+            nullptr, EWeaponFiringType::Beam, 30, 0));
         }
     }
 
@@ -1044,7 +1044,7 @@ class UShipStateComponent : UActorComponent
     {
         UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);
         //TODO: Implement Max range check
-        if (Target == nullptr || !EquipmentSlots.Contains(WeaponSlotTag) || Weapon == nullptr || !Weapon.IsOperational())
+        if (!EquipmentSlots.Contains(WeaponSlotTag) || Weapon == nullptr || !Weapon.IsOperational())
             return false;
 
         float Accuracy = GetShipStat(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
@@ -1052,11 +1052,15 @@ class UShipStateComponent : UActorComponent
 
         float EffectiveMaxDamage = GetEffectiveWeaponMaxDamage(WeaponSlotTag);
 
-        FDamageSpec Damage = GameLogic::CreateDamageSpec(Target, Weapon.DamageType, Weapon.MinDamage, EffectiveMaxDamage, Accuracy, Weapon.ShieldBypass);
-        FDamageCalculationOutput Output = Target.ApplySelfDamage(Damage);
-
         AddHeat(Weapon.HeatUse * HeatModifier); // firing costs the shooter heat too
-        TotalDamage = Math::RoundToFloat(Output.HullDamage + Output.ShieldDamage);
+
+        //Target may not have a UShipStateComponent and instead smth else
+        if (Target != nullptr)
+        {
+            FDamageSpec Damage = GameLogic::CreateDamageSpec(Target, Weapon.DamageType, Weapon.MinDamage, EffectiveMaxDamage, Accuracy, Weapon.ShieldBypass);
+            FDamageCalculationOutput Output = Target.ApplySelfDamage(Damage);
+            TotalDamage = Math::RoundToFloat(Output.HullDamage + Output.ShieldDamage);
+        }
         return true;
     }
 
@@ -1222,6 +1226,12 @@ class UShipStateComponent : UActorComponent
         //SetAfterburners(true);
         bChangedLoadout = true;
         RecalculateShipStats();
+
+        //Set Weapon Ranges
+        for (int32 i = 0; i < CachedWeaponStats.Num(); i++)
+        {
+            WeaponOrders[i].Range = CachedWeaponStats[GameLogic::GetWeaponSlot(i)].Range*10 + GameLogic::FalloffRange;
+        }
 
         //RemoveAllGlobalModifiersByStat(GameplayTags::SpaceShip_Stat_Negative_ShipMass);
         //RecalculateShipStats();

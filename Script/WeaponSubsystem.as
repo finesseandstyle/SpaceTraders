@@ -66,6 +66,8 @@ struct FWeaponShot
     UPROPERTY() EWeaponFiringType FiringType; //Instant -> Attacker.FireWeaponAt; Ballistic->Projectile->Attacker.FireProjectileWeapon & Spawn Homing Projectile
     UPROPERTY() float Initiative;
     UPROPERTY() float FinalFireTime;
+    UPROPERTY() float Range;
+
     UPROPERTY() EWeaponState WeaponState;
 
     bool opCmp(const FWeaponShot& Other) const
@@ -75,7 +77,7 @@ struct FWeaponShot
 
     FWeaponShot(FGameplayTag InWeaponSlot, FName InWeaponName, UShipStateComponent InAttacker, AGameObject InTarget,
                 USceneComponent InSourceRoot, USceneComponent InTargetRoot,
-                EWeaponFiringType InFiringType, float InInitiative, EWeaponState InWeaponState=EWeaponState::Unequipped)
+                EWeaponFiringType InFiringType, float InInitiative, float InRange, EWeaponState InWeaponState=EWeaponState::Unequipped)
     {
         WeaponSlot = InWeaponSlot;
         WeaponName = InWeaponName;
@@ -86,6 +88,7 @@ struct FWeaponShot
         FiringType = InFiringType;
         Initiative = InInitiative;
         WeaponState = InWeaponState;
+        Range = InRange;
     }
 
 };
@@ -95,6 +98,8 @@ struct FWeaponSpawningRuleRow
     UPROPERTY() UStaticMesh ProjectileMesh;
     UPROPERTY() UNiagaraSystem ShotNS;
     UPROPERTY() UNiagaraSystem ImpactNS;
+    UPROPERTY() USoundWave ShotSound;
+    UPROPERTY() USoundWave ImpactSound;
 }
 
 class UWeaponSubsystem : UScriptWorldSubsystem
@@ -185,8 +190,9 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         if (Defender.ObjectType == GameplayTags::GameObject_Ship)
         {
             float Damage;
-            UShipStateComponent Stats = Defender.GetComponentByClass(UShipStateComponent);
-            Stats.FireWeaponAt(WeaponSlot, Stats, Damage);
+            UShipStateComponent AttackerStats = Attacker.GetComponentByClass(UShipStateComponent);
+            UShipStateComponent DefenderStats = Defender.GetComponentByClass(UShipStateComponent);
+            AttackerStats.FireWeaponAt(WeaponSlot, DefenderStats, Damage);
             UTopDownPlannerComponent Planner = Gameplay::GetPlayerController(0).GetComponentByClass(UTopDownPlannerComponent);
 
             if (Planner != nullptr)
@@ -194,6 +200,12 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         }
         else if (Defender.ObjectType == GameplayTags::GameObject_Loot || Defender.ObjectType == GameplayTags::GameObject_Projectile)
         {
+            
+            float Damage;
+            UShipStateComponent AttackerStats = Attacker.GetComponentByClass(UShipStateComponent);
+            AttackerStats.FireWeaponAt(WeaponSlot, nullptr, Damage);
+            //UShipStateComponent AttackerStats = Attacker.GetComponentByClass(UShipStateComponent);
+            //AttackerStats.AddHeat(Weapon.HeatUse * HeatModifier); // firing costs the shooter heat too
             Defender.DestroyActor(); //any instance of damage against Loot will destroy it
             //TODO: Projectiles have their own simplified health
         }
@@ -375,6 +387,8 @@ class UWeaponSubsystem : UScriptWorldSubsystem
             Beam.LaserTemplateNS.SetVectorParameter(n"BeamStart", Beam.SourceRoot.WorldLocation);
             Beam.LaserTemplateNS.SetVectorParameter(n"BeamEnd", Beam.TargetRoot.WorldLocation + Beam.OffsetPosition);
         }
+
+        //We always let the weapon VFX play out first 
 
         if (!bTurnActive)
             return;
@@ -567,9 +581,8 @@ class UWeaponSubsystem : UScriptWorldSubsystem
     }
 
     // ------------------------------------------------------------------
-    // Plain insertion sorts. Per-turn shot counts are small, so O(n^2) is
-    // a non-issue -- swap for a predicate-based TArray::Sort() if your
-    // AngelScript build exposes one.
+    // Insertion sort
+    // TODO : replace with proper faster sorting and add more sorting params like weapon slots used, stats and weapon id
     // ------------------------------------------------------------------
     private void SortByInitiativeDescending(TArray<FWeaponShot>& Shots) const
     {
@@ -610,8 +623,13 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         AGameObject AttackerObject = Cast<AGameObject>(GetAttackerNode(Shot));
         AGameObject DefenderObject = Cast<AGameObject>(Shot.Target);
 
-        //Won't target invalid objects
-        if (!IsValid(DefenderObject))
+        //Objects can be destroyed during turn execution, we don't fire if any of the 2 are invalid
+        //TODO: object destruction sequences 
+        if (!IsValid(AttackerObject) || !IsValid(DefenderObject))
+            return;
+
+        //Range check
+        if (!GameLogic::IsInRange(AttackerObject.ActorLocation, DefenderObject.ActorLocation, Shot.Range))
             return;
 
         float OffsetMax = 75;

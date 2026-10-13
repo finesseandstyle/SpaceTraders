@@ -14,20 +14,20 @@ namespace GameMath
 
         if (MousePos.X <= ScrollPixels)
         {
-            ScrollDir.X = -1.0f; // Left Edge
+            ScrollDir.X = -1.0; // Left Edge
         }
         else if (MousePos.X >= (ViewportSize.X - ScrollPixels))
         {
-            ScrollDir.X = 1.0f;  // Right Edge
+            ScrollDir.X = 1.0;  // Right Edge
         }
 
         if (MousePos.Y <= ScrollPixels)
         {
-            ScrollDir.Y = 1.0f; // Top Edge
+            ScrollDir.Y = 1.0; // Top Edge
         }
         else if (MousePos.Y >= (ViewportSize.Y - ScrollPixels))
         {
-            ScrollDir.Y = -1.0f;  // Bottom Edge
+            ScrollDir.Y = -1.0;  // Bottom Edge
         }
 
         return ScrollDir;
@@ -87,7 +87,7 @@ namespace GameMath
     }
 
     //Left to right, top to bottom traversal of 9 equally spaced quadrants of the screen starting from top left
-    FVector2D GetToolTipOffset(int Quadrant)
+    FVector2D GetToolTipAlignment(int Quadrant)
     {
         switch(Quadrant)
         {
@@ -105,17 +105,19 @@ namespace GameMath
     }
 
     UFUNCTION()
-    void GetTooltipParamsFromWorldLocation(APlayerController PlayerController, FVector WorldLocation, FVector2D&out ScreenPosition, FVector2D&out Offset)
+    void GetTooltipParamsFromWorldLocation(APlayerController PlayerController, FVector WorldLocation, FVector2D&out ScreenPosition, FVector2D&out Alignment)
     {
-        FVector2D Temp;
+        FVector2D Temp, QuadrantTemp;
         FVector2D ViewportSize = WidgetLayout::GetViewportSize();
-        WidgetLayout::ProjectWorldLocationToWidgetPosition(PlayerController, WorldLocation, Temp, true);
+        WidgetLayout::ProjectWorldLocationToWidgetPosition(PlayerController, WorldLocation, Temp, false);
+        Gameplay::ProjectWorldToScreen(PlayerController, WorldLocation, QuadrantTemp);
+        float X = Math::Clamp(Temp.X, 0, ViewportSize.X);
+        float Y = Math::Clamp(Temp.Y, 0, ViewportSize.Y);
 
-        float X = Math::Clamp(Temp.X, 0, ViewportSize.X + 0.8);
-        float Y = Math::Clamp(Temp.Y, 0, ViewportSize.Y + 0.8);
-
-        ScreenPosition = FVector2D(X, Y);
-        Offset = GetToolTipOffset(Math::RoundToInt(X / ViewportSize.X * 3.0) + Math::RoundToInt(Y / ViewportSize.Y * 3.0) * 3);
+        ScreenPosition = FVector2D(X, Y); //Tooltip position needs Widget Projection while quadrants need normal projection idk why
+        int Row = Math::FloorToInt(QuadrantTemp.X / ViewportSize.X * 3.0); 
+        int Col = Math::FloorToInt(QuadrantTemp.Y / ViewportSize.Y * 3.0);
+        Alignment = GetToolTipAlignment(Row + Col * 3);
     }
 
     //Maybe create an alternative with 
@@ -151,7 +153,7 @@ namespace GameMath
     UFUNCTION()
     AGameObject GetNearestGameObject_Trace(AGameObject Self, float Radius)
     {
-        if (Self == nullptr || Radius <= 0.0f)
+        if (Self == nullptr || Radius <= 0.0)
             return nullptr;
 
         FVector SelfLocation = Self.GetActorLocation();

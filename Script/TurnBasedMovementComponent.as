@@ -965,6 +965,9 @@ class UTurnBasedMovementComponent : UActorComponent
             TArray<AActor> PendingItems;
             for (AActor Item : CandidateItems)
             {
+                if (!IsValid(Item))
+                    continue;
+
                 float ItemDist = GetItemLocation(Item).Distance(GetOwner().ActorLocation);
                 if (ItemDist <= TractorBeamRadius)
                 {
@@ -1126,7 +1129,7 @@ class UTurnBasedMovementComponent : UActorComponent
         {
             FBeamState& Beam = CurrentTurnState.ActiveBeams[i];
 
-            if (Beam.Item == nullptr)
+            if (!IsValid(Beam.Item))
             {
                 CurrentTurnState.ActiveBeams.RemoveAt(i);
                 continue;
