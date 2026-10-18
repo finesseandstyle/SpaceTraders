@@ -890,6 +890,42 @@ class UShipStateComponent : UActorComponent
 
     }
 
+    UFUNCTION()
+    void UpdateWeaponOrders()
+    {
+        for (FWeaponShot& Order : WeaponOrders)
+        {
+            FWeaponShot TempOrder;
+            if (GetWeaponOrderFromEquippedWeapon(Order.WeaponSlot, TempOrder))
+            {
+                Order.Initiative = TempOrder.Initiative;
+                Order.FiringType = TempOrder.FiringType;
+                Order.WeaponName = TempOrder.WeaponName;
+            }
+        }
+    }
+
+    bool GetWeaponOrderFromEquippedWeapon(FGameplayTag WeaponSlot, FWeaponShot&out Order)
+    {
+        if (!EquipmentSlots.Contains(WeaponSlot)) return false;
+
+        UItemWeapon Weapon = GetWeaponFragment(WeaponSlot);
+        if (Weapon == nullptr) return false;
+
+        Order.Initiative = Weapon.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_Weapon_Initiative);
+        Order.FiringType = Weapon.WeaponType;
+        FString EnumName = f"{Weapon.WeaponType :n}";
+        Order.WeaponName = FName(EnumName);
+        
+        Order.WeaponState = EWeaponState::Unequipped; 
+        /*Rules for weapon state management
+        1 - Unequipped if not broken when swapping weapons
+        2 - Broken when broken regardless
+        3 - Targeting if it has a target
+        */
+        return true;
+    }
+
     // Call once per WEGO turn resolution, after orders have been applied.
     UFUNCTION()
     void AdvanceTurn()
@@ -1140,7 +1176,13 @@ class UShipStateComponent : UActorComponent
     UItemDefinition TestHullDefinition;
 
     UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
-    UItemDefinition TestWeaponDefinition;
+    UItemDefinition Weapon1Definition;
+
+    UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
+    UItemDefinition Weapon2Definition;
+
+    UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
+    UItemDefinition Weapon3Definition;
 
     UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
     UItemDefinition TestShieldGeneratorDefinition;
@@ -1177,17 +1219,21 @@ class UShipStateComponent : UActorComponent
         
         SwapItem(GameplayTags::SpaceShip_Equipment_Hull, InstantiateItem(TestHullDefinition));
     
-        if (TestWeaponDefinition != nullptr)
+        if (Weapon1Definition != nullptr )
         {
-            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_01, InstantiateItem(TestWeaponDefinition));
-            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_02, InstantiateItem(TestWeaponDefinition));
-            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_03, InstantiateItem(TestWeaponDefinition));
-            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_04, InstantiateItem(TestWeaponDefinition));
-            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_05, InstantiateItem(TestWeaponDefinition));
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_01, InstantiateItem(Weapon1Definition));
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_02, InstantiateItem(Weapon1Definition));
         }
-        //FGameItem BrokenWeapon;
-        UItemWeapon BrokenWeapon = GetWeaponFragment(GameplayTags::SpaceShip_Equipment_Weapon_05);
-        BrokenWeapon.CurrentDurability = 0.0;
+        if (Weapon2Definition != nullptr )
+        {
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_03, InstantiateItem(Weapon2Definition));
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_04, InstantiateItem(Weapon2Definition));
+        }
+        if (Weapon3Definition != nullptr)
+            EquipItem(GameplayTags::SpaceShip_Equipment_Weapon_05, InstantiateItem(Weapon3Definition));
+        //Broken Item test
+        //UItemWeapon BrokenWeapon = GetWeaponFragment(GameplayTags::SpaceShip_Equipment_Weapon_05);
+        //BrokenWeapon.CurrentDurability = 0.0;
 
 
         for (int32 i = 0; i < 5; i++)
@@ -1199,7 +1245,7 @@ class UShipStateComponent : UActorComponent
             weapon.RecalculateStats();
         } //6 for normal ships, 10 for stations
 
-        WeaponOrders[4].WeaponState = EWeaponState::Broken; //must update dynamically
+        //WeaponOrders[4].WeaponState = EWeaponState::Broken; //must update dynamically
 
         if (TestShieldGeneratorDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_ShieldGenerator, InstantiateItem(TestShieldGeneratorDefinition));
@@ -1227,11 +1273,15 @@ class UShipStateComponent : UActorComponent
         bChangedLoadout = true;
         RecalculateShipStats();
 
+        UpdateWeaponOrders();
         //Set Weapon Ranges
         for (int32 i = 0; i < CachedWeaponStats.Num(); i++)
         {
             WeaponOrders[i].Range = CachedWeaponStats[GameLogic::GetWeaponSlot(i)].Range*10 + GameLogic::FalloffRange;
         }
+
+
+        
 
         //RemoveAllGlobalModifiersByStat(GameplayTags::SpaceShip_Stat_Negative_ShipMass);
         //RecalculateShipStats();
@@ -1282,7 +1332,7 @@ class UShipStateComponent : UActorComponent
         DummyTarget.CharacterStats.Add(Evasion);
         DummyTarget.RecalculateShipStats();
 
-        if (TestWeaponDefinition != nullptr)
+        if (Weapon1Definition != nullptr)
         {
             float Damage;
             FireWeaponAt(GameplayTags::SpaceShip_Equipment_Weapon_01, DummyTarget, Damage);

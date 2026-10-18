@@ -289,6 +289,7 @@ class UMicromodule : UItemFragment
 class UItemWeapon : UItemEquipment
 {
     UPROPERTY() FGameplayTag WeaponSize = GameplayTags::WeaponSize_Medium; //Small, Medium, Large
+    UPROPERTY() EWeaponFiringType WeaponType;
 
     //Min Range, Max Range, Max damage is already part of the ItemEquipment's Stats
 

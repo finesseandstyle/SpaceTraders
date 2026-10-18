@@ -750,8 +750,9 @@ class UTopDownPlannerComponent : UActorComponent
             //Get Weapon Icon
             FGameplayTag WeaponSlot = GameLogic::GetWeaponSlot(i);
             FGameItem Weapon;
+            
             if (ShipComp.EquipmentSlots.Find(WeaponSlot, Weapon))
-                Icons.Add(Weapon.ItemDefinition.Icon.Get());
+                Icons.Add(System::LoadAsset_Blocking(Weapon.ItemDefinition.Icon));
             else 
                 Icons.Add(nullptr);
         }

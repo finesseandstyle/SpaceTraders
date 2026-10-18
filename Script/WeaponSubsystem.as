@@ -126,7 +126,12 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         if (Defender.ObjectType == GameplayTags::GameObject_Ship)
         {
             float Damage;
-            Stats.FireWeaponAt(WeaponSlot, nullptr, Damage);
+            UShipStateComponent DefenderStats = Defender.GetComponentByClass(UShipStateComponent);
+            Stats.FireWeaponAt(WeaponSlot, DefenderStats, Damage);
+            UTopDownPlannerComponent Planner = Gameplay::GetPlayerController(0).GetComponentByClass(UTopDownPlannerComponent);
+
+            if (Planner != nullptr)
+                Planner.DisplayDamageNumbers(Defender.ActorLocation + OffsetPosition, Damage);
         }
         else if (Defender.ObjectType == GameplayTags::GameObject_Loot)
         {
@@ -136,6 +141,7 @@ class UWeaponSubsystem : UScriptWorldSubsystem
         {
             //Projectiles have their own simplified health
         }
+
         FireProjectile(Row.ShotNS, Row.ImpactNS, MuzzleLocation, Defender.RootComponent, OffsetPosition);
     }
 
