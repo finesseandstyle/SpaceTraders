@@ -107,7 +107,8 @@ struct FItemWindow
 
 class UTurnBasedMovementComponent : UActorComponent
 {
-    ATopDown_GameState CachedGameState;
+    //ATopDown_GameState CachedGameState;
+    UTurnResolutionSubsystem TRS;
 
     UPROPERTY() FOnPickupStart OnPickupStart;
     UPROPERTY() FOnPickupEnd OnPickupEnd;
@@ -158,7 +159,8 @@ class UTurnBasedMovementComponent : UActorComponent
     void BeginPlay()
     {
         SetComponentTickEnabled(false);
-        CachedGameState = Cast<ATopDown_GameState>(Gameplay::GetGameState());
+        //CachedGameState = Cast<ATopDown_GameState>(Gameplay::GetGameState());
+        TRS = UTurnResolutionSubsystem::Get();
     }
 
     UFUNCTION(BlueprintOverride)
@@ -174,7 +176,7 @@ class UTurnBasedMovementComponent : UActorComponent
             return;
 
         // --- Position update ---
-        float NormDist  = MovementCurve.GetFloatValue(CachedGameState.NormalizedTurnProgress - StoppedTimeEnd);
+        float NormDist  = MovementCurve.GetFloatValue(TRS.NormalizedTurnProgress - StoppedTimeEnd);
         float WorldDist = StartDistance + NormDist * SegmentLength;
         Owner.SetActorLocation(PathSpline.GetLocationAtDistanceAlongSpline(WorldDist, ESplineCoordinateSpace::World));
 
@@ -241,7 +243,7 @@ class UTurnBasedMovementComponent : UActorComponent
         FPathProperties Path;
         Path.EaseFraction = 0.1;
         Path.SampleInterval = 100;
-        MovementCurve = UPathingUtils::GetMovementCurve2(PathSpline, StartDistance, SegmentLength, CachedGameState.TurnDuration, OriginalNominalSpeed, Path);
+        MovementCurve = UPathingUtils::GetMovementCurve2(PathSpline, StartDistance, SegmentLength, TRS.TurnDuration, OriginalNominalSpeed, Path);
     }
 
     UFUNCTION()
@@ -265,7 +267,7 @@ class UTurnBasedMovementComponent : UActorComponent
         }
 
         MovementState = (bImmediatePickup) ? EShipMovementState::StoppedForPickup : EShipMovementState::Moving;
-        OriginalNominalSpeed = (CachedGameState.TurnDuration > 0.0) ? (SegmentLength / CachedGameState.TurnDuration) : 0.0;
+        OriginalNominalSpeed = (TRS.TurnDuration > 0.0) ? (SegmentLength / TRS.TurnDuration) : 0.0;
         OriginalDirection = PathSpline.GetDirectionAtDistanceAlongSpline(EndDistance, ESplineCoordinateSpace::World);
         StoppedTimeStart = 0.0;
         StoppedTimeEnd = 0.0;
@@ -294,7 +296,7 @@ class UTurnBasedMovementComponent : UActorComponent
         if (!IsMoving())
             return;
 
-        StoppedTimeStart = CachedGameState.NormalizedTurnProgress;
+        StoppedTimeStart = TRS.NormalizedTurnProgress;
 
         MovementState = EShipMovementState::StoppedForPickup;
         OnPickupStart.Broadcast();
@@ -311,7 +313,7 @@ class UTurnBasedMovementComponent : UActorComponent
             return;
         }
 
-        StoppedTimeEnd = StoppedTimeEnd + CachedGameState.NormalizedTurnProgress - StoppedTimeStart;
+        StoppedTimeEnd = StoppedTimeEnd + TRS.NormalizedTurnProgress - StoppedTimeStart;
 
         MovementState = EShipMovementState::Moving;
         OnPickupEnd.Broadcast();
@@ -1035,7 +1037,7 @@ class UTurnBasedMovementComponent : UActorComponent
 
         UnregisterTarget(LootObject, false);
         OnItemCollected.Broadcast(LootObject, Item);
-        CachedGameState.GameObjects.Remove(Cast<AGameObject>(LootObject));
+        TRS.GameObjects.Remove(Cast<AGameObject>(LootObject));
         //TODO: Inventory transfer functionality
         LootObject.DestroyActor();
 

@@ -1,6 +1,7 @@
 // TurnResolutionSubsystem.as
-//
-// Respnosible for managing lifecycle of gameobjects, turn managament, weapon
+// Responsible for managing lifecycle of gameobjects, turn managament, weapon, economy, everything dependant on
+// execution and managament of the turn based system
+
 
 event void FOnTurnUpdate2();
 event void FOnTurnResume2();
@@ -15,7 +16,7 @@ const float DefaultBeamSpeed = 35000.0;
 const float BeamSustainTime = 0.25;
 const int MaxFiringRounds = 3;
 
-/*
+
 struct FPendingVfxProjectile
 {
     UNiagaraComponent NiagaraComponent;
@@ -113,7 +114,7 @@ struct FWeaponSpawningRuleRow
     UPROPERTY() UNiagaraSystem ImpactNS;
     UPROPERTY() USoundWave ShotSound;
     UPROPERTY() USoundWave ImpactSound;
-}*/
+}
 
 class UTurnResolutionSubsystem : UScriptWorldSubsystem
 {
@@ -829,28 +830,3 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
         }
     }
 }
-
-// ======================================================================
-// MIGRATION NOTES
-// ======================================================================
-// 1. Any `Cast<ATopDown_GameState>(Gameplay::GetGameState())` elsewhere in
-//    the project needs to become a subsystem fetch instead, e.g.:
-//        UTurnResolutionSubsystem TurnSys = GetWorld().GetSubsystem(UTurnResolutionSubsystem);
-//    (adjust to whatever subsystem accessor your AngelScript build exposes).
-//
-// 2. ATopDown_GameState::BeginPlay() ran via the actor lifecycle; subsystems
-//    don't have BeginPlay. I mapped its body to Initialize() (the common
-//    subsystem-init override in AngelScript-UE) -- confirm this is the
-//    right override name/timing in your build, since GetAllActorsOfClass
-//    and world setup may need the world to be further along than a
-//    subsystem's Initialize() guarantees.
-//
-// 3. ATopDown_GameState::SetActorTickEnabled(...) was an AActor method and
-//    doesn't exist on a subsystem. I renamed calls to SetTickEnabled(...)
-//    as a placeholder -- replace with however this AngelScript-UE build
-//    toggles tick on a UScriptWorldSubsystem (some builds just gate the
-//    work inside Tick() with a bool instead of disabling the tick itself).
-//
-// 4. If anything (UI, save data, other subsystems) held a direct reference
-//    to the ATopDown_GameState actor itself (not just its fields), that
-//    reference will need to be repointed at this subsystem too.

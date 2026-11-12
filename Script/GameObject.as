@@ -31,21 +31,21 @@ class AGameObject : APawn
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
     {
-        ATopDown_GameState GameState = Cast<ATopDown_GameState>(Gameplay::GetGameState());
-        GameState.GameObjects.Add(this);
+        auto TRS = UTurnResolutionSubsystem::Get();
+        TRS.GameObjects.Add(this);
 
         FGameplayTag Race;
         if (ObjectType == GameplayTags::GameObject_Ship)
             Race = GetComponentByClass(UShipStateComponent).Faction;
 
-        GameState.OnSmallObjectSpawned.Broadcast(this.RootComponent, ObjectType, Race);
+        TRS.OnSmallObjectSpawned.Broadcast(this.RootComponent, ObjectType, Race);
     }
 
     UFUNCTION(BlueprintOverride)
     void Destroyed()
     {
-        Cast<ATopDown_GameState>(Gameplay::GetGameState()).GameObjects.Remove(this);
-        Cast<ATopDown_GameState>(Gameplay::GetGameState()).OnSmallObjectDestroyed.Broadcast(this.RootComponent);
+        UTurnResolutionSubsystem::Get().GameObjects.Remove(this);
+        UTurnResolutionSubsystem::Get().OnSmallObjectDestroyed.Broadcast(this.RootComponent);
     }
 
     //Not advisable way to do this, TODO: find a better way of finding the main mesh of a game object

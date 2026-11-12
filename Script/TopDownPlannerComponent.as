@@ -250,7 +250,7 @@ class UTopDownPlannerComponent : UActorComponent
     {
         FVector AdjustedLocation;
         int Distance, Days;
-        if (Cast<ATopDown_GameState>(Gameplay::GetGameState()).bIsGamePaused)
+        if (UTurnResolutionSubsystem::Get().bIsGamePaused)
         {
             if (bMultiWaypoint && MoveComp.HasPathDefined())
             {
@@ -380,7 +380,7 @@ class UTopDownPlannerComponent : UActorComponent
     UFUNCTION()
     void GoToRotatedLocation(FVector ClickStartLocation, FVector DragEndLocation)
     {
-        if (!Cast<ATopDown_GameState>(Gameplay::GetGameState()).bIsGamePaused)
+        if (!UTurnResolutionSubsystem::Get().bIsGamePaused)
             return;
 
         FVector AdjustedLocation;
@@ -394,9 +394,7 @@ class UTopDownPlannerComponent : UActorComponent
     AGameObject GetNearestSpaceShip(AGameObject ExcludeObject)
     {
         // Retrieve the active GameState cast to your custom state
-        ATopDown_GameState GameState = Cast<ATopDown_GameState>(Gameplay::GetGameState());
-        if (GameState == nullptr)
-            return nullptr;
+        auto TRS = UTurnResolutionSubsystem::Get();
 
         // Get the owner or origin location for distance calculations
         // (Assuming this function is inside an Actor/Component; fallback to zero vector if needed)
@@ -406,7 +404,7 @@ class UTopDownPlannerComponent : UActorComponent
         float MinDistanceSq = MAX_flt;
 
         // Iterate through all tracked game objects in the GameState
-        for (AGameObject Obj : GameState.GameObjects)
+        for (AGameObject Obj : TRS.GameObjects)
         {
             if (Obj == nullptr || Obj == ExcludeObject)
                 continue;
