@@ -499,7 +499,7 @@ class UTopDownPlannerComponent : UActorComponent
             WeaponMinRangeIndicator.SetIndicatorVisibility(true);
 
             DamageFalloffIndicator.SetRadius(WeaponRange + GameLogic::FalloffRange);
-            DamageFalloffIndicator.SetIndicatorVisibility(true);
+            DamageFalloffIndicator.SetIndicatorVisibility(false); //change this to true to enable this
 
             WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
         }
@@ -659,7 +659,7 @@ class UTopDownPlannerComponent : UActorComponent
                 WeaponMinRangeIndicator.SetIndicatorVisibility(true);
 
                 DamageFalloffIndicator.SetRadius(WeaponRange + GameLogic::FalloffRange);
-                DamageFalloffIndicator.SetIndicatorVisibility(true);
+                DamageFalloffIndicator.SetIndicatorVisibility(false); //change this to true
 
                 WeaponMaxRangeIndicator.SetIndicatorVisibility(false);
             }

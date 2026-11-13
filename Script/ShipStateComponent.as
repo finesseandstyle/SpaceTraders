@@ -5,26 +5,6 @@
 // the aggregated ship-wide stat cache, and the three stats that change
 // during turn execution: Hull Points, Shield Points, Heat.
 // This is the main application of our Attribute-Ability System (AAS)
-//
-// Design notes reflecting the latest round of changes:
-//   - Exactly one hull, always present, always at GameplayTags::SpaceShip_Equipment_Hull.
-//     UnequipItem refuses that slot; SwapItem is the only way to replace it
-//     (and doubles as the way to install the very first one).
-//   - Every other equipment slot (Weapon_1..N, ShieldGenerator, FuelTank, ...)
-//     is granted by the equipped hull's OpenSlots the moment SwapItem installs
-//     it - see GrantSlotsFromHull().
-//   - Weapon damage bonuses (DamageGlobal, DamageKinetic/Energetic/Explosive)
-//     are NOT part of CachedShipStats. A ship can carry several weapons with
-//     different base MaxDamage and different DamageTypes, and a Multiplicative
-//     modifier on "DamageGlobal" only means something relative to each
-//     individual weapon's own MaxDamage - there's no single ship-wide number
-//     that's correct for all of them. Instead there's a second, per-weapon
-//     cache (CachedWeaponMaxDamage, keyed by slot tag) rebuilt alongside the
-//     main one - see RecalculateWeaponDamageCache() and GameLogic::ApplyModifierGroup.
-//   - Slot tags such as SpaceShip_Equipment_Weapon_01 are assumed to be real
-//     dot-hierarchy children of SpaceShip_Equipment_Weapon, so
-//     FGameplayTag::MatchesTag() works for slot/item-type compatibility.
-// ============================================================================
 
 event void FShipHullDestroyed(UShipStateComponent Ship);
 event void FShipOverheated(UShipStateComponent Ship);
@@ -901,6 +881,7 @@ class UShipStateComponent : UActorComponent
                 Order.Initiative = TempOrder.Initiative;
                 Order.FiringType = TempOrder.FiringType;
                 Order.WeaponName = TempOrder.WeaponName;
+                Order.Range = TempOrder.Range;
             }
         }
     }
@@ -916,6 +897,7 @@ class UShipStateComponent : UActorComponent
         Order.FiringType = Weapon.WeaponType;
         FString EnumName = f"{Weapon.WeaponType :n}";
         Order.WeaponName = FName(EnumName);
+        Order.Range = GetWeaponRange(WeaponSlot);
         
         Order.WeaponState = EWeaponState::Unequipped; 
         /*Rules for weapon state management
@@ -1076,7 +1058,7 @@ class UShipStateComponent : UActorComponent
     
 
     UFUNCTION()
-    bool FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target, float&out TotalDamage=0.0)
+    bool FireWeaponAt(FGameplayTag WeaponSlotTag, UShipStateComponent Target, float&out TotalDamage=0.0, float FiringRoundHeatModifier=1.0)
     {
         UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);
         //TODO: Implement Max range check
@@ -1107,7 +1089,7 @@ class UShipStateComponent : UActorComponent
     }
 
     UFUNCTION()
-    bool FireProjectileWeapon(FGameplayTag WeaponSlotTag, USceneComponent HomingTarget, FProjectileDamageSpec&out Damage)
+    bool FireProjectileWeapon(FGameplayTag WeaponSlotTag, USceneComponent HomingTarget, FProjectileDamageSpec&out Damage, float FiringRoundHeatModifier=1.0)
     {
         UItemWeapon Weapon = GetWeaponFragment(WeaponSlotTag);
         if (HomingTarget == nullptr || !EquipmentSlots.Contains(WeaponSlotTag) || Weapon == nullptr || !Weapon.IsOperational())
@@ -1277,7 +1259,7 @@ class UShipStateComponent : UActorComponent
         //Set Weapon Ranges
         for (int32 i = 0; i < CachedWeaponStats.Num(); i++)
         {
-            WeaponOrders[i].Range = CachedWeaponStats[GameLogic::GetWeaponSlot(i)].Range*10 + GameLogic::FalloffRange;
+            WeaponOrders[i].Range = CachedWeaponStats[GameLogic::GetWeaponSlot(i)].Range*10;// + GameLogic::FalloffRange;
         }
 
 

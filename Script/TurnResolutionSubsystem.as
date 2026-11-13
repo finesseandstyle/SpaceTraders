@@ -1,21 +1,20 @@
-// TurnResolutionSubsystem.as
-// Responsible for managing lifecycle of gameobjects, turn managament, weapon, economy, everything dependant on
-// execution and managament of the turn based system
+/* TurnResolutionSubsystem.as
+ Responsible for managing lifecycle of gameobjects, turn managament, weapon, economy, everything dependant on
+ execution and managament of the turn based system
+ */
 
-
-event void FOnTurnUpdate2();
-event void FOnTurnResume2();
-event void FOnTurnPaused2();
-event void FOnTurnDurationChanged2();
-event void FOnSmallObjectSpawned2(USceneComponent RootComponent, FGameplayTag ObjectType, FGameplayTag Race);
-event void FOnSmallObjectDestroyed2(USceneComponent RootComponent);
-event void FOnGameStateInitialized2();
+event void FOnTurnUpdate();
+event void FOnTurnResume();
+event void FOnTurnPaused();
+event void FOnTurnDurationChanged();
+event void FOnSmallObjectSpawned(USceneComponent RootComponent, FGameplayTag ObjectType, FGameplayTag Race);
+event void FOnSmallObjectDestroyed(USceneComponent RootComponent);
+event void FOnGameStateInitialized();
 
 const float DefaultProjectileSpeed = 15000.0;
 const float DefaultBeamSpeed = 35000.0;
 const float BeamSustainTime = 0.25;
-const int MaxFiringRounds = 3;
-
+const int MaxFiringRounds = 2;
 
 struct FPendingVfxProjectile
 {
@@ -42,7 +41,6 @@ struct FPendingVfxBeam
     float Duration = 0.0;
     float ElapsedTime = 0.0;
 }
-
 
 enum EWeaponFiringType
 {
@@ -83,6 +81,8 @@ struct FWeaponShot
     UPROPERTY() float Range;
 
     UPROPERTY() EWeaponState WeaponState;
+    UPROPERTY() bool bTryExtraAttack = false;
+    UPROPERTY() int FiringRound = 0;
 
     bool opCmp(const FWeaponShot& Other) const
     {
@@ -119,17 +119,17 @@ struct FWeaponSpawningRuleRow
 class UTurnResolutionSubsystem : UScriptWorldSubsystem
 {
     // ==================================================================
-    // -- From TopDown_GameState: turn clock, pause state, world registry --
+    // -- Turn clock, pause state, world registry --
     // ==================================================================
     const FTimespan OneTurn = FTimespan::FromDays(1);
 
-    UPROPERTY() FOnTurnUpdate2 OnTurnUpdate;
-    UPROPERTY() FOnTurnResume2 OnTurnResume;
-    UPROPERTY() FOnTurnPaused2 OnTurnPaused;
-    UPROPERTY() FOnTurnDurationChanged2 OnTurnDurationChanged;
-    UPROPERTY() FOnSmallObjectSpawned2 OnSmallObjectSpawned;
-    UPROPERTY() FOnSmallObjectDestroyed2 OnSmallObjectDestroyed;
-    UPROPERTY() FOnGameStateInitialized2 OnGameStateReady;
+    UPROPERTY() FOnTurnUpdate OnTurnUpdate;
+    UPROPERTY() FOnTurnResume OnTurnResume;
+    UPROPERTY() FOnTurnPaused OnTurnPaused;
+    UPROPERTY() FOnTurnDurationChanged OnTurnDurationChanged;
+    UPROPERTY() FOnSmallObjectSpawned OnSmallObjectSpawned;
+    UPROPERTY() FOnSmallObjectDestroyed OnSmallObjectDestroyed;
+    UPROPERTY() FOnGameStateInitialized OnGameStateReady;
 
     //1 January 3300
     UPROPERTY() FDateTime CurrentTurnDate = FDateTime(3300, 1, 1);
@@ -153,7 +153,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     bool bQueuePause = false;
 
     // ==================================================================
-    // -- From WeaponSubsystem: VFX pools + weapon data --
+    // -- VFX pools + weapon data --
     // ==================================================================
     private TArray<FPendingVfxProjectile> ActiveVFXShots;
     private TArray<FPendingVfxBeam> ActiveVFXBeams;
@@ -161,14 +161,14 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     UPROPERTY() UDataTable WeaponSpawningRules;
 
     // ==================================================================
-    // -- Combat timeline state (previously WeaponSubsystem's own clock) --
+    // -- Combat timeline state  --
     // ==================================================================
     private TArray<FWeaponShot> Timeline;
     private int32 NextShotIndex = 0;
     private bool bTurnActive = false;
 
     // ------------------------------------------------------------------
-    // Lifecycle (from TopDown_GameState::BeginPlay)
+    // Lifecycle 
     // ------------------------------------------------------------------
     UFUNCTION(BlueprintOverride)
     void Initialize()
@@ -232,7 +232,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
                     );
                 }
 
-                ActiveVFXShots.RemoveAtSwap(i);
+                ActiveVFXShots.RemoveAtSwap(i); //we don't care about the order
             }
             else
             {
@@ -274,8 +274,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             Beam.LaserTemplateNS.SetVectorParameter(n"BeamEnd", Beam.TargetRoot.WorldLocation + Beam.OffsetPosition);
         }
 
-        //We always let the weapon VFX play out first
-
+        //We always let the weapon VFX play out first before the logic
         if (!bTurnActive)
             return;
 
@@ -402,6 +401,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     void BeginTurn()
     {
         Timeline = BuildTimeline();
+        ConsumeExtraAttackRequests();
         NextShotIndex = 0;
         bTurnActive = Timeline.Num() > 0;
     }
@@ -413,10 +413,10 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     }
 
     // ==================================================================
-    // -- Weapon firing (from WeaponSubsystem, unchanged) --
+    // -- VFX Weapon firing --
     // ==================================================================
     UFUNCTION()
-    void FireInstantProjectile(FName RowName, FGameplayTag WeaponSlot, FVector MuzzleLocation, AGameObject Attacker, AGameObject Defender, FVector OffsetPosition)
+    void FireInstantProjectile(FName RowName, FGameplayTag WeaponSlot, FVector MuzzleLocation, AGameObject Attacker, AGameObject Defender, FVector OffsetPosition, float HeatModifier=1.0)
     {
         FWeaponSpawningRuleRow Row;
         WeaponSpawningRules.FindRow(RowName, Row);
@@ -425,7 +425,12 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
         if (Defender.ObjectType == GameplayTags::GameObject_Ship)
         {
             float Damage;
-            Stats.FireWeaponAt(WeaponSlot, nullptr, Damage);
+            UShipStateComponent DefenderStats = Defender.GetComponentByClass(UShipStateComponent);
+            Stats.FireWeaponAt(WeaponSlot, DefenderStats, Damage, HeatModifier);
+            
+            UTopDownPlannerComponent Planner = Gameplay::GetPlayerController(0).GetComponentByClass(UTopDownPlannerComponent);
+            if (Planner != nullptr)
+                Planner.DisplayDamageNumbers(Defender.ActorLocation + OffsetPosition, Damage);
         }
         else if (Defender.ObjectType == GameplayTags::GameObject_Loot)
         {
@@ -435,10 +440,10 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
         {
             //Projectiles have their own simplified health
         }
-        FireProjectile(Row.ShotNS, Row.ImpactNS, MuzzleLocation, Defender.RootComponent, OffsetPosition);
+        FireProjectileBase(Row.ShotNS, Row.ImpactNS, MuzzleLocation, Defender.RootComponent, OffsetPosition);
     }
 
-    private void FireProjectile(
+    private void FireProjectileBase(
         UNiagaraSystem TracerVfx,
         UNiagaraSystem ImpactVfx,
         FVector MuzzleLocation,
@@ -481,7 +486,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
 
     UFUNCTION()
     void FireBeam(FName RowName, FGameplayTag WeaponSlot, AGameObject Attacker,
-        AGameObject Defender, FVector OffsetPosition)
+        AGameObject Defender, FVector OffsetPosition, float HeatModifier=1.0)
     {
         FWeaponSpawningRuleRow Row;
         WeaponSpawningRules.FindRow(RowName, Row);
@@ -491,7 +496,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             float Damage;
             UShipStateComponent AttackerStats = Attacker.GetComponentByClass(UShipStateComponent);
             UShipStateComponent DefenderStats = Defender.GetComponentByClass(UShipStateComponent);
-            AttackerStats.FireWeaponAt(WeaponSlot, DefenderStats, Damage);
+            AttackerStats.FireWeaponAt(WeaponSlot, DefenderStats, Damage, HeatModifier);
             UTopDownPlannerComponent Planner = Gameplay::GetPlayerController(0).GetComponentByClass(UTopDownPlannerComponent);
 
             if (Planner != nullptr)
@@ -502,17 +507,17 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
 
             float Damage;
             UShipStateComponent AttackerStats = Attacker.GetComponentByClass(UShipStateComponent);
-            AttackerStats.FireWeaponAt(WeaponSlot, nullptr, Damage);
+            AttackerStats.FireWeaponAt(WeaponSlot, nullptr, Damage, HeatModifier);
             //UShipStateComponent AttackerStats = Attacker.GetComponentByClass(UShipStateComponent);
             //AttackerStats.AddHeat(Weapon.HeatUse * HeatModifier); // firing costs the shooter heat too
             Defender.DestroyActor(); //any instance of damage against Loot will destroy it
             //TODO: Projectiles have their own simplified health
         }
 
-        FireBeam2(Row.ShotNS, Row.ImpactNS, Attacker.RootComponent, Defender.RootComponent, OffsetPosition);
+        FireBeamBase(Row.ShotNS, Row.ImpactNS, Attacker.RootComponent, Defender.RootComponent, OffsetPosition);
     }
 
-    private void FireBeam2(
+    private void FireBeamBase(
         UNiagaraSystem BeamVfx,
         UNiagaraSystem ImpactVfx,
         USceneComponent SourceRootComponent,
@@ -582,13 +587,13 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     }
 
     UFUNCTION()
-    void FireBallisticProjectile(FName RowName, FGameplayTag WeaponSlot, AGameObject Attacker, USceneComponent TargetRootComponent)
+    void FireBallisticProjectile(FName RowName, FGameplayTag WeaponSlot, AGameObject Attacker, USceneComponent TargetRootComponent, float HeatModifier=1.0)
     {
         FWeaponSpawningRuleRow Row;
         WeaponSpawningRules.FindRow(RowName, Row);
         UShipStateComponent Stats = Attacker.GetComponentByClass(UShipStateComponent);
         FProjectileDamageSpec Damage2;
-        Stats.FireProjectileWeapon(WeaponSlot, TargetRootComponent, Damage2);
+        Stats.FireProjectileWeapon(WeaponSlot, TargetRootComponent, Damage2, HeatModifier);
         UTurnBasedMovementComponent MoveComp = Attacker.GetComponentByClass(UTurnBasedMovementComponent);
 
         ABallisticProjectile Projectile = SpawnActor(ABallisticProjectile, Attacker.ActorLocation, Attacker.ActorRotation, bDeferredSpawn = true);
@@ -687,30 +692,37 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
         }
 
         // --- Step 3: resolve firing order + timing within each cluster ---
+        // --- Step 3: assign firing rounds, then time each round inside its own slice of the turn ---
         for (int32 Root : ClusterRoots)
         {
             FWeaponShotCluster Cluster = Clusters[Root];
-            SortByInitiativeDescending(Cluster.Shots);
 
-            const int32 Count = Cluster.Shots.Num();
-            for (int32 i = 0; i < Count; i++)
+            TArray<FWeaponShotCluster> Rounds; // array-of-struct, since nested arrays aren't allowed
+            for (int32 r = 0; r < Math::Max(1, MaxFiringRounds); r++)
+                Rounds.Add(FWeaponShotCluster());
+
+            AssignFiringRounds(Cluster.Shots, Rounds);
+
+            int32 RoundCount = 1;
+            for (int32 r = 0; r < Rounds.Num(); r++)
             {
-                FWeaponShot TimedShot = Cluster.Shots[i];
+                if (Rounds[r].Shots.Num() > 0)
+                    RoundCount = r + 1;
+            }
 
-                // Spread this cluster's shots evenly across the turn window.
-                // Same-rank shots in equal-sized clusters land on the same
-                // timestamp by construction -- that's what keeps unrelated
-                // duels executing in lockstep, while a cluster's internal
-                // order stays strictly Initiative-ordered.
-                //
-                // Divide by Count (not Count - 1): this reserves one extra,
-                // unused slot at rank == Count (i.e. at exactly TurnDuration)
-                // so the last real shot never lands right on the turn
-                // boundary. E.g. 4 weapons -> 0.0, 0.25, 0.5, 0.75, with
-                // 1.0 left empty.
-                TimedShot.FinalFireTime = (float(i) / float(Count)) * TurnDuration;
+            const float RoundWindow = TurnDuration / float(RoundCount);
 
-                FinalTimeline.Add(TimedShot);
+            for (int32 r = 0; r < RoundCount; r++)
+            {
+                SortByInitiativeDescending(Rounds[r].Shots);
+
+                const int32 Count = Rounds[r].Shots.Num();
+                for (int32 i = 0; i < Count; i++)
+                {
+                    FWeaponShot TimedShot = Rounds[r].Shots[i];
+                    TimedShot.FinalFireTime = (float(r) * RoundWindow) + (float(i) / float(Count)) * RoundWindow;
+                    FinalTimeline.Add(TimedShot);
+                }
             }
         }
 
@@ -791,6 +803,75 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
         }
     }
 
+    private void AssignFiringRounds(TArray<FWeaponShot>& ClusterShots, TArray<FWeaponShotCluster>& Rounds) const
+    {
+        for (FWeaponShot& Shot : ClusterShots)
+        {
+            AGameObject Attacker = Cast<AGameObject>(GetAttackerNode(Shot));
+            AGameObject Defender = Shot.Target;
+
+            Shot.FiringRound = 0;
+
+            if (MaxFiringRounds < 2 || !IsValid(Attacker) || !IsValid(Defender))
+            {
+                Rounds[0].Shots.Add(Shot);
+                continue;
+            }
+
+            if (GameLogic::IsInRange(Attacker.ActorLocation, Defender.ActorLocation, Shot.Range))
+            {
+                Rounds[0].Shots.Add(Shot);
+
+                if (Shot.bTryExtraAttack)
+                {
+                    FWeaponShot Extra = Shot;
+                    Extra.FiringRound = 1;
+                    Rounds[1].Shots.Add(Extra);
+                }
+            }
+            else if (CanReachByNextRound(Shot, Attacker, Defender))
+            {
+                Shot.FiringRound = 1; // deferred: normal heat
+                Rounds[1].Shots.Add(Shot);
+            }
+            else
+            {
+                Rounds[0].Shots.Add(Shot); // hopeless: tries now, fails at fire time, never creates round 2
+            }
+        }
+    }
+
+    // Round 2 starts at T/2 whenever it exists, as long as nothing uses round 3+.
+    private bool CanReachByNextRound(const FWeaponShot& Shot, AGameObject Attacker, AGameObject Defender) const
+    {
+        //const float ClosingBudget = EstimateTravelDistance(Attacker, 0.5);
+        //turn GameLogic::IsInRange(Attacker.ActorLocation, Defender.ActorLocation, Shot.Range + ClosingBudget);
+        return true;
+    }
+/*
+    // Swap the body for planned-path sampling if the movement component can expose it.
+    private float EstimateTravelDistance(AGameObject Obj, float NormalizedTime) const
+    {
+        UTurnBasedMovementComponent MoveComp = Obj.GetComponentByClass(UTurnBasedMovementComponent);
+        if (MoveComp == nullptr)
+            return 0.0;
+        return MoveComp.GetInstantSpeed() * 0.265 * TurnDuration * NormalizedTime * ReachSafetyFactor;
+    }*/
+
+    // TurnUpdate() runs before BeginTurn(), so clearing the flag in AdvanceTurn would eat it before it's read.
+    private void ConsumeExtraAttackRequests()
+    {
+        //Possible to optimize this by consolidating game object iteration in another looop
+        for (AGameObject Ship : GameObjects)
+        {
+            if (Ship == nullptr) continue;
+            UShipStateComponent State = Ship.GetComponentByClass(UShipStateComponent);
+            if (State == nullptr) continue;
+            for (FWeaponShot& Order : State.WeaponOrders)
+                Order.bTryExtraAttack = false;
+        }
+    }
+
     // ------------------------------------------------------------------
     // Step 5: dispatch each shot to the right firing function.
     // ------------------------------------------------------------------
@@ -805,24 +886,24 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             return;
 
         //Range check
-        if (!GameLogic::IsInRange(AttackerObject.ActorLocation, DefenderObject.ActorLocation, Shot.Range))
+        if (!GameLogic::IsInRange(AttackerObject.ActorLocation, DefenderObject.ActorLocation, Shot.Range + GameLogic::FalloffRange))
             return;
 
         float OffsetMax = 75;
         FVector Offset = FVector(Math::RandRange(0, OffsetMax), Math::RandRange(0, OffsetMax), Math::RandRange(0, OffsetMax));
-
+        float HeatModifier = 1.0 + (Shot.bTryExtraAttack && Shot.FiringRound == 1 ? 1.0 : 0.0 * GameLogic::ExtraAttackHeatMultiplier);
         switch (Shot.FiringType)
         {
             case EWeaponFiringType::Projectile:
-                FireInstantProjectile(Shot.WeaponName, Shot.WeaponSlot, Shot.SourceRoot.WorldLocation, AttackerObject, DefenderObject, Offset);
+                FireInstantProjectile(Shot.WeaponName, Shot.WeaponSlot, Shot.SourceRoot.WorldLocation, AttackerObject, DefenderObject, Offset, HeatModifier);
                 break;
 
             case EWeaponFiringType::Beam:
-                FireBeam(Shot.WeaponName, Shot.WeaponSlot, AttackerObject, DefenderObject, Offset);
+                FireBeam(Shot.WeaponName, Shot.WeaponSlot, AttackerObject, DefenderObject, Offset, HeatModifier);
                 break;
 
             case EWeaponFiringType::Ballistic:
-                FireBallisticProjectile(Shot.WeaponName, Shot.WeaponSlot, AttackerObject, Shot.TargetRoot);
+                FireBallisticProjectile(Shot.WeaponName, Shot.WeaponSlot, AttackerObject, Shot.TargetRoot, HeatModifier);
                 break;
 
             default:
