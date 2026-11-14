@@ -40,6 +40,7 @@ namespace GameLogic
 
     const float MaxSpeedMass = 750;
     const float MinSpeedMass = 2500;
+    const float MaxMassPenaltyMultiplier = 0.5;
 
     const float FalloffRange = 1000.0;
     const float ExtraAttackHeatMultiplier = 2.5;
@@ -167,7 +168,7 @@ namespace GameLogic
 
     // ── Ship speed (Space Rangers HD derived) ──────────────────────────────────
     /**
-     * ShipMaxSpeed - Includes Base Speed + potential Upgrades and Micromodule effects.
+     * ShipBaseSpeed - Includes Base Speed + potential Upgrades and Micromodule effects.
      *                The hull item's own FStatAttribute for Speed's Value is this.
      * ShipMass - Calculated from ShipState's CurrentMass (GetTotalShipMass())
      * SlowdownMultiplier - OnHitEffects that reduce our SlowdownMultiplier to a min of 0.5
@@ -175,12 +176,12 @@ namespace GameLogic
      * MultiplierBonuses - Artifacts like Psi Matter Accelerator and Stimulant Gaalian Alacrity that grant % change
      * FlatBonuses - Artifacts like Soplanator and Acrine (Global) that give flat bonuses
      */
-    float GetShipSpeed(float ShipMaxSpeed, float ShipMass, float SlowdownMultiplier, float ShipReliability, 
+    float GetShipSpeed(float ShipBaseSpeed, float ShipMass, float SlowdownMultiplier, bool bEngineOperational, 
         float MultiplierBonuses, float FlatBonuses)
     {
-        float k_weight = Math::GetMappedRangeValueClamped(FVector2D(MaxSpeedMass, MinSpeedMass), FVector2D(1.0, 0.333), ShipMass);
-        float k_slowdown = Math::Clamp(SlowdownMultiplier, 0.5f, 1.0);
-        float k_broken = Math::Clamp(ShipReliability, 0.3f,1.0);
+        float k_weight = Math::GetMappedRangeValueClamped(FVector2D(MaxSpeedMass, MinSpeedMass), FVector2D(1.0, MaxMassPenaltyMultiplier), ShipMass);
+        float k_slowdown = Math::Clamp(SlowdownMultiplier, 0.5, 1.0);
+        float k_broken = bEngineOperational ? 1.0 : 0.3;
         
 
         // SpeedCoeficient = e^(-4thRoot( Sum( ln^4(k_i) ) ))
@@ -192,7 +193,7 @@ namespace GameLogic
         float SpeedCoeficient = Math::Exp(-Math::Pow(SumLn4, 0.25));
 
         //Flat bonuses before scaling
-        float RawSpeed = (ShipMaxSpeed * SpeedCoeficient * MultiplierBonuses) + FlatBonuses;
+        float RawSpeed = (ShipBaseSpeed * SpeedCoeficient * MultiplierBonuses) + FlatBonuses;
 
         float FinalSpeed = RawSpeed;
 

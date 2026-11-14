@@ -691,7 +691,6 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             Clusters[RootIdx].Shots.Add(Shot);
         }
 
-        // --- Step 3: resolve firing order + timing within each cluster ---
         // --- Step 3: assign firing rounds, then time each round inside its own slice of the turn ---
         for (int32 Root : ClusterRoots)
         {
@@ -703,13 +702,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
 
             AssignFiringRounds(Cluster.Shots, Rounds);
 
-            int32 RoundCount = 1;
-            for (int32 r = 0; r < Rounds.Num(); r++)
-            {
-                if (Rounds[r].Shots.Num() > 0)
-                    RoundCount = r + 1;
-            }
-
+            const int32 RoundCount = Math::Max(1, MaxFiringRounds);
             const float RoundWindow = TurnDuration / float(RoundCount);
 
             for (int32 r = 0; r < RoundCount; r++)
@@ -818,6 +811,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
                 continue;
             }
 
+            //If in range, 1st firing round, else 2nd firing round
             if (GameLogic::IsInRange(Attacker.ActorLocation, Defender.ActorLocation, Shot.Range))
             {
                 Rounds[0].Shots.Add(Shot);
@@ -829,34 +823,13 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
                     Rounds[1].Shots.Add(Extra);
                 }
             }
-            else if (CanReachByNextRound(Shot, Attacker, Defender))
-            {
-                Shot.FiringRound = 1; // deferred: normal heat
-                Rounds[1].Shots.Add(Shot);
-            }
             else
             {
-                Rounds[0].Shots.Add(Shot); // hopeless: tries now, fails at fire time, never creates round 2
+                Shot.FiringRound = 1; // late shot
+                Rounds[1].Shots.Add(Shot);
             }
         }
     }
-
-    // Round 2 starts at T/2 whenever it exists, as long as nothing uses round 3+.
-    private bool CanReachByNextRound(const FWeaponShot& Shot, AGameObject Attacker, AGameObject Defender) const
-    {
-        //const float ClosingBudget = EstimateTravelDistance(Attacker, 0.5);
-        //turn GameLogic::IsInRange(Attacker.ActorLocation, Defender.ActorLocation, Shot.Range + ClosingBudget);
-        return true;
-    }
-/*
-    // Swap the body for planned-path sampling if the movement component can expose it.
-    private float EstimateTravelDistance(AGameObject Obj, float NormalizedTime) const
-    {
-        UTurnBasedMovementComponent MoveComp = Obj.GetComponentByClass(UTurnBasedMovementComponent);
-        if (MoveComp == nullptr)
-            return 0.0;
-        return MoveComp.GetInstantSpeed() * 0.265 * TurnDuration * NormalizedTime * ReachSafetyFactor;
-    }*/
 
     // TurnUpdate() runs before BeginTurn(), so clearing the flag in AdvanceTurn would eat it before it's read.
     private void ConsumeExtraAttackRequests()

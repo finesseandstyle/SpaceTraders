@@ -401,8 +401,6 @@ class UShipStateComponent : UActorComponent
         if (!bStatsDirty)
             return;
 
-        //if (CachedShipStats.Contains(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed))
-            //Print(f"{GameplayTags::SpaceShip_Stat_Positive_MaxSpeed} - {CachedShipStats[GameplayTags::SpaceShip_Stat_Positive_MaxSpeed]}", 20);
         RecalculateShipStats();
         bStatsDirty = false;
     }
@@ -577,6 +575,11 @@ class UShipStateComponent : UActorComponent
         return Cast<UItemHull>(UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_Hull].Fragments, UItemHull));
     }
 
+    private UItemHull GetEngineFragment()
+    {
+        return Cast<UItemHull>(UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_Hull].Fragments, UItemHull));
+    }
+
     private UItemFuelTank GetFuelTankFragment()
     {
         return Cast<UItemFuelTank>(UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_FuelTank].Fragments, UItemFuelTank));
@@ -650,28 +653,26 @@ class UShipStateComponent : UActorComponent
     float GetShipSpeed()
     {
         UItemHull HullFragment = GetHullFragment();
-        if (HullFragment == nullptr)
+        if (!EquipmentSlots.Contains(GameplayTags::SpaceShip_Equipment_Engine))
+            return 0.0;
+        UItemEquipment Engine = UGameUtility::GetItemFragment(EquipmentSlots[GameplayTags::SpaceShip_Equipment_Engine].Fragments, UItemEquipment);
+        if (HullFragment == nullptr || Engine == nullptr)
             return 0.0;
 
-        // ShipMaxSpeed comes from the hull's own MaxSpeed Value, not
-        // GetShipStat() - it's item-local BaseValue + this item's own
-        // Upgrade/Micromodule Modifiers only. Ship-wide bonuses (Acrine,
-        // Artifacts, Stimulants) are handled separately below and must NOT
-        // be folded in here too, or they'd get counted twice.
-        float ShipMaxSpeed = HullFragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+        float BaseShipSpeed = HullFragment.BaseSpeed + Engine.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_ShipSpeed);
         float SlowdownMultiplier = 1 - GetActiveEffectValue(GameplayTags::SpaceShip_ActiveEffect_Slowdown, 0.0);
 
         // Global/Acrine speed bonuses (Psi Matter Accelerator, Stimulant
         // Gaalian Alacrity, an Acrine +50 Speed modifier, ...) live in
         // GlobalModifiers, not on any item's Stats - kept separate from
-        // ShipMaxSpeed above so they're never double-counted.
-        FModifierComponents SpeedBonuses = GameLogic::GetModifierComponents(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, GlobalModifiers);
+        // ShipSpeed above so they're never double-counted.
+        FModifierComponents SpeedBonuses = GameLogic::GetModifierComponents(GameplayTags::SpaceShip_Stat_Positive_ShipSpeed, GlobalModifiers);
 
         float CalculatedSpeed = GameLogic::GetShipSpeed(
-            ShipMaxSpeed,
+            BaseShipSpeed,
             GetShipStat(GameplayTags::SpaceShip_Stat_Negative_ShipMass),
             SlowdownMultiplier,
-            GetCurrentSpeedMultiplier(),
+            Engine.IsOperational(),
             SpeedBonuses.MultiplicativeFactor,
             SpeedBonuses.AdditiveSum);
 
@@ -773,21 +774,6 @@ class UShipStateComponent : UActorComponent
         return WeaponStats.Range;
     }
 
-    // 0-100. Feeds GetReliabilitySpeedMultiplier from ShipCombatMath.as
-    // (<10% -> critical penalty, <25% -> major penalty).
-    float GetHullReliabilityPercent()
-    {
-        float Max = GetMaxHullPoints();
-        if (Max <= 0.0)
-            return 100.0;
-        return (GetCurrentHullPoints() / Max) * 100.0;
-    }
-
-    float GetCurrentSpeedMultiplier()
-    {
-        return GameLogic::GetReliabilitySpeedMultiplier(GetHullReliabilityPercent());
-    }
-
     UFUNCTION()
     bool SetShieldsActive(EShipMovementState State, float ActiveValue, bool&out ChangedShield)
     {
@@ -833,7 +819,7 @@ class UShipStateComponent : UActorComponent
     void SetAfterburners(bool Active = true)
     {
         FStatModifier Afterburner = FStatModifier(GameplayTags::StatSource_ActiveEffect,
-            GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative, 1.0);
+            GameplayTags::SpaceShip_Stat_Positive_ShipSpeed, EStatType::Multiplicative, 1.0);
         //1.0 -> +100% -> 2x increase
 
         //Just a usage example of checking active effects
@@ -858,13 +844,13 @@ class UShipStateComponent : UActorComponent
     void UpdateSpeedStat()
     {
         float OldSpeed;
-        CachedShipStats.Find(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, OldSpeed);
+        CachedShipStats.Find(GameplayTags::SpaceShip_Stat_Positive_ShipSpeed, OldSpeed);
 
         float NewSpeed = GetShipSpeed();
 
         if (OldSpeed != NewSpeed)
         {
-            CachedShipStats.Add(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, NewSpeed);
+            CachedShipStats.Add(GameplayTags::SpaceShip_Stat_Positive_ShipSpeed, NewSpeed);
             OnSpeedChanged.Broadcast(NewSpeed);
         }
 
@@ -1181,19 +1167,22 @@ class UShipStateComponent : UActorComponent
     UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
     UItemDefinition TestDroidDefinition;
 
+    UPROPERTY(EditAnywhere, Category = "Debug|Self Test")
+    UItemDefinition TestEngineDefinition;
+
     UFUNCTION()
     void RunSelfTest()
     {
         FGameItem Hull = InstantiateItem(TestHullDefinition);
         UItemHull Fragment = Cast<UItemHull>(UGameUtility::GetItemFragment(Hull.Fragments, UItemHull));
         Hull.Mass = Math::RoundToInt(Fragment.GetHullMass());
-        float Speed1 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+        float Speed1 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_ShipSpeed);
         float Dur1 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
 
-        //Fragment.AddModifier(GameplayTags::StatSource_Upgrade, GameplayTags::SpaceShip_Stat_Positive_MaxSpeed, EStatType::Multiplicative,0.31);
+        //Fragment.AddModifier(GameplayTags::StatSource_Upgrade, GameplayTags::SpaceShip_Stat_Positive_ShipSpeed, EStatType::Multiplicative,0.31);
         Fragment.AddModifier(GameplayTags::StatSource_Micromodule1, GameplayTags::SpaceShip_Stat_Positive_MaximumDurability, EStatType::Multiplicative, 0.2);
         Fragment.RecalculateStats();
-        float Speed2 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaxSpeed);
+        float Speed2 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_ShipSpeed);
         float Dur2 = Fragment.GetItemStat(GameplayTags::SpaceShip_Stat_Positive_MaximumDurability);
         //Print(f"MaxDur:{Dur1}->{Dur2}\nCurrentDur:{Fragment.CurrentDurability}");
 
@@ -1241,8 +1230,11 @@ class UShipStateComponent : UActorComponent
         if (TestRadarDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_Radar, InstantiateItem(TestRadarDefinition));
 
-        if (TestRadarDefinition != nullptr)
+        if (TestDroidDefinition != nullptr)
             EquipItem(GameplayTags::SpaceShip_Equipment_Droid, InstantiateItem(TestDroidDefinition));
+        
+        if (TestEngineDefinition != nullptr)
+            EquipItem(GameplayTags::SpaceShip_Equipment_Engine, InstantiateItem(TestEngineDefinition));
 
         ActiveEffects.Add(GameplayTags::SpaceShip_ActiveEffect_ShieldsActivated, FActiveEffect(-1, 1.0, 1.0));
         FStatAttribute Accuracy = FStatAttribute(GameplayTags::SpaceShip_Stat_Positive_Accuracy, 0.0);
@@ -1284,7 +1276,7 @@ class UShipStateComponent : UActorComponent
             //Print(f"Stat:{Stat.StatTag}={Stat.Value}", 20);
         }
 
-        //Print(f"{GameplayTags::SpaceShip_Stat_Positive_MaxSpeed} - {CachedShipStats[GameplayTags::SpaceShip_Stat_Positive_MaxSpeed]}", 20);
+        Print(f"{GameplayTags::SpaceShip_Stat_Positive_ShipSpeed} - {CachedShipStats[GameplayTags::SpaceShip_Stat_Positive_ShipSpeed]}", 20);
 
         
         

@@ -9,6 +9,7 @@ class ULootComponent : UActorComponent
     // Item is collected when it reaches within this radius of the ship. */
     UPROPERTY() bool bCanBePickedUp = true;
     UPROPERTY(ExposeOnSpawn) FGameItem Item;
+    default SetComponentTickEnabled(false);
 
     /**
      * Fired once when collected. CollectedItem is this component's owner —
@@ -24,12 +25,12 @@ class ULootComponent : UActorComponent
     private AActor CurrentPuller = nullptr;
     private float CurrentPullerScore = -1.0;
     private bool bIsCollected = false;
-
+/*
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
     {
         SetComponentTickEnabled(false);
-    }
+    }*/
 
     // -------------------------------------------------------------------------
     // Contention API

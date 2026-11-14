@@ -1,64 +1,3 @@
-/*From Item.h
-UCLASS(Abstract, EditInlineNew, CollapseCategories)
-class SPACETRADERS_API UItemFragment : public UObject {GENERATED_BODY()};
-
-UCLASS(BlueprintType)
-class SPACETRADERS_API UItemDefinition : public UDataAsset
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (MultiLine="true"))
-	FText Name;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (MultiLine="true"))
-	FText Description;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	FGameplayTag ItemType;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	int32 BasePrice = 0; //A base price of -1 would signal that the item has no price to display
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	TSoftObjectPtr<UTexture2D> Icon;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	TSoftClassPtr<UObject> Class;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	TSoftObjectPtr<UStaticMesh> StaticMesh;
-
-	//If true, items with the same ItemKey will stack
-	//Container items should never stack, instead they work a bit differently
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	bool IsStackable = false;
-
-	//Mass of an item equals Mass * Weight Multiplier if it's a stackable item
-    //All equipment is non stackable, meaning its Item Mass is always equal to the Mass value 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-	float WeightMultiplier = 1.f;
-	
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Instanced, Category = "Fragments", Meta = (EditFixedOrder))
-	TArray<UItemFragment*> Fragments;
-	
-    //the same function also exists on UGameUitility
-	UFUNCTION(BlueprintCallable, meta = (DeterminesOutputType = "FragmentType"))
-	const UItemFragment* GetFragment(const TSubclassOf<UItemFragment>& FragmentType) const
-	{
-		for (const auto Fragment : Fragments)
-		{
-			if (Fragment && Fragment->IsA(FragmentType))
-			{
-				return Fragment;
-			}
-		}
-
-		return nullptr;
-	}
-};
-*/
-
 enum EMicromoduleType
 {
 	Blue,   //Level 3
@@ -306,6 +245,7 @@ class UItemWeapon : UItemEquipment
 class UItemHull : UItemEquipment
 {
 	UPROPERTY() FGameplayTagContainer OpenSlots; //Spaceship_Equipment tags
+    UPROPERTY() float BaseSpeed = 300;
 
 	float GetHullSize() { 
         return GetItemStat(GameplayTags::SpaceShip_Stat_Positive_CargoCapacity) + 
