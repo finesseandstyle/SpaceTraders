@@ -107,7 +107,6 @@ struct FItemWindow
 
 class UTurnBasedMovementComponent : UActorComponent
 {
-    //ATopDown_GameState CachedGameState;
     UTurnResolutionSubsystem TRS;
 
     UPROPERTY() FOnPickupStart OnPickupStart;
@@ -509,9 +508,10 @@ class UTurnBasedMovementComponent : UActorComponent
     }
 
     UFUNCTION()
-    void UpdateSpeed(float MaxSpeedStat, FVector&out AdjustedLocation, int&out Distance, int&out Days)
+    void UpdateSpeed(float ShipSpeedStat, FVector&out AdjustedLocation, int&out Distance, int&out Days)
     {
-        CurrentSpeed = MaxSpeedStat * 10; //Max Speed Stat is the ShipState's Stat
+        CurrentSpeed = ShipSpeedStat * 10; //Max Speed Stat is the ShipState's Stat, 
+        //Note cannot be set to 0 otherwise clicking a new path crashes the script
 
         //This allows using Afterburner mid turn without changing the path
         if (MovementState != EShipMovementState::HasPathDefined) return; 
@@ -526,6 +526,7 @@ class UTurnBasedMovementComponent : UActorComponent
         {
             for (int32 i = 1; i < Waypoints.Num(); i++)
             {
+                System::DrawDebugSphere(AdjustedLocation, Duration=3);
                 SetNewWaypoint(Waypoints[i], AdjustedLocation, Distance, Days);
             }
         }
