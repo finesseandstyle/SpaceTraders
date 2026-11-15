@@ -508,17 +508,17 @@ class UTurnBasedMovementComponent : UActorComponent
     }
 
     UFUNCTION()
-    void UpdateSpeed(float ShipSpeedStat, FVector&out AdjustedLocation, int&out Distance, int&out Days)
+    bool  UpdateSpeed(float ShipSpeedStat, FVector&out AdjustedLocation, int&out Distance, int&out Days)
     {
         CurrentSpeed = ShipSpeedStat * 10; //Max Speed Stat is the ShipState's Stat, 
         //Note cannot be set to 0 otherwise clicking a new path crashes the script
 
         //This allows using Afterburner mid turn without changing the path
-        if (MovementState != EShipMovementState::HasPathDefined) return; 
+        if (MovementState != EShipMovementState::HasPathDefined) return false; 
 
         TArray<FVector> Waypoints = GetPathWaypoints();
 
-        if (Waypoints.Num() <= 0) return;
+        if (Waypoints.Num() <= 0) return false;
 
         SetPath(Waypoints[0], AdjustedLocation, Distance, Days);
 
@@ -526,10 +526,10 @@ class UTurnBasedMovementComponent : UActorComponent
         {
             for (int32 i = 1; i < Waypoints.Num(); i++)
             {
-                System::DrawDebugSphere(AdjustedLocation, Duration=3);
                 SetNewWaypoint(Waypoints[i], AdjustedLocation, Distance, Days);
             }
         }
+        return true;
     }
 
     UFUNCTION()
@@ -557,17 +557,25 @@ class UTurnBasedMovementComponent : UActorComponent
     UFUNCTION()
     TArray<FVector> GetPathWaypoints()
     {
-        //Every 3rd point is a waypoint
         TArray<FVector> Waypoints;
+        if (PathSpline == nullptr || Owner == nullptr)
+            return Waypoints;
 
-        int StartPoint = Math::FloorToInt(PathSpline.FindInputKeyClosestToWorldLocation(GetPathStartLocation()));
-    
-        //i: 0->3, 1->3, 2->3, 3->6, 4->6, 7->9, etc.
-        for (int32 i = (Math::TruncToInt(StartPoint / 3.0) + 1) * 3; i <= PathSpline.NumberOfSplinePoints; i+=3)
+        // Where the ship actually is on the path. StartDistance is where the *last
+        // turn began* and goes stale as soon as that turn plays out.
+        const float ShipDist = GetShipSplineDist();
+
+        // Covers float error when a turn ends exactly on a waypoint.
+        const float ReachedTolerance = 10.0;
+
+        // Waypoints are every 3rd point: 3, 6, 9... (index 0 is the path's own start)
+        for (int i = 3; i < PathSpline.GetNumberOfSplinePoints(); i += 3)
         {
-            FVector Loc = PathSpline.GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World);
-            Waypoints.Add(Loc);
-            //System::DrawDebugSphere(Loc, Duration=4);
+            // Already reached (or standing on it). Re-adding it makes SetPath loop back to it.
+            if (PathSpline.GetDistanceAlongSplineAtSplinePoint(i) <= ShipDist + ReachedTolerance)
+                continue;
+
+            Waypoints.Add(PathSpline.GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World));
         }
         return Waypoints;
     }

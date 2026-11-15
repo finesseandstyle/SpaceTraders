@@ -250,6 +250,10 @@ class UTopDownPlannerComponent : UActorComponent
     {
         FVector AdjustedLocation;
         int Distance, Days;
+
+        if (MoveComp.CurrentSpeed <= 0)
+            return;
+
         if (UTurnResolutionSubsystem::Get().bIsGamePaused)
         {
             if (bMultiWaypoint && MoveComp.HasPathDefined())
