@@ -200,4 +200,12 @@ namespace GameMath
 
         return NearestObject;
     }
+
+    float RandomNormalInRange(float Min, float Max)
+    {
+        if (Max <= Min)
+            return Min;
+        
+        return (Math::RandRange(Min, Max) + Math::RandRange(Min, Max) + Math::RandRange(Min, Max)) / 3.0f;
+    }
 }

@@ -171,6 +171,16 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     private int32 NextShotIndex = 0;
     private bool bTurnActive = false;
 
+    // ==================================================================
+    // ECONOMY: state
+    // ==================================================================
+
+    // Treat these three as read-only from other scripts (reading them directly
+    // avoids copying the arrays); mutate through AddMarket/UpdateMarket/AddProducer.
+    UPROPERTY() TArray<FGlobalTradeGoodStatus> GlobalEconomyStatuses; // indexed by int(ETradeGoodType)
+    UPROPERTY() TArray<FMarket> GlobalMarkets;
+    UPROPERTY() TArray<FProducer> GlobalProducers;
+
     // ------------------------------------------------------------------
     // Lifecycle 
     // ------------------------------------------------------------------
@@ -893,16 +903,6 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     }
 
     // ==================================================================
-    // ECONOMY: state
-    // ==================================================================
-
-    // Treat these three as read-only from other scripts (reading them directly
-    // avoids copying the arrays); mutate through AddMarket/UpdateMarket/AddProducer.
-    UPROPERTY() TArray<FGlobalTradeGoodStatus> GlobalEconomyStatuses; // indexed by int(ETradeGoodType)
-    UPROPERTY() TArray<FMarket> GlobalMarkets;
-    UPROPERTY() TArray<FProducer> GlobalProducers;
-
-    // ==================================================================
     // ECONOMY: lifecycle
     // ==================================================================
 
@@ -1072,13 +1072,12 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
         FGlobalTradeGoodStatus TradeGood = GetGlobalStatusByTradeGoodType(TradeGoodType);
 
         float RangeScalingMultiplier = MaxRange != 0.0 ? TradeGood.BaseRange / MaxRange : 1.0;
-        float BaseRange = TradeGood.BaseRange; // e.g. 0.45 / 0.5 = 0.9
 
         float PositiveProducerModifier = (ProducerPriceModifier >= 1.0) ? Math::Abs(1.0 - ProducerPriceModifier) : 0.0;
         float NegativeProducerModifier = (ProducerPriceModifier < 1.0) ? Math::Abs(1.0 - ProducerPriceModifier) : 0.0; // e.g. 0.4
 
-        float PositiveModifiers = Math::Abs(PositiveProducerModifier) * RangeScalingMultiplier; //* TradeDifficulty;
-        float NegativeModifiers = Math::Abs(NegativeProducerModifier) * RangeScalingMultiplier; //* TradeDifficulty;
+        float PositiveModifiers = Math::Abs(PositiveProducerModifier) * RangeScalingMultiplier;
+        float NegativeModifiers = Math::Abs(NegativeProducerModifier) * RangeScalingMultiplier;
 
         // Balancing out modifiers so that the price is pushed in one direction
         if (PositiveModifiers > NegativeModifiers)
@@ -1092,8 +1091,8 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             PositiveModifiers = 0.0;
         }
 
-        float Floor = 1.0 - BaseRange + PositiveModifiers;
-        float Ceil = 1.0 + BaseRange - NegativeModifiers;
+        float Floor = 1.0 - TradeGood.BaseRange + PositiveModifiers;
+        float Ceil = 1.0 + TradeGood.BaseRange - NegativeModifiers;
 
         return CalculateBuyLogistic(Floor, Ceil, SupplyRatio);
     }
@@ -1116,7 +1115,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     }
 
     UFUNCTION(BlueprintPure)
-    int32 CalculateFinalPrice(ETradeGoodType TradeGoodType, float PricePoint, float BonusModifier, int32 MinPrice, bool Debug = false) const
+    int32 CalculateFinalPrice(ETradeGoodType TradeGoodType, float PricePoint, float BonusModifier=1.0, int32 MinPrice=MAX_int32, bool Debug = false) const
     {
         FGlobalTradeGoodStatus TradeGoodStatus = GetGlobalStatusByTradeGoodType(TradeGoodType);
 
@@ -1129,7 +1128,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     }
 
     UFUNCTION(BlueprintPure)
-    int32 CalculateBuyFinalPrice(ETradeGoodType TradeGoodType, const FTradeGoodStatus& MarketStatus) const
+    int32 CalculateBuyFinalPrice(ETradeGoodType TradeGoodType, const FMarketGoodStatus& MarketStatus) const
     {
         FGlobalTradeGoodStatus GlobalStatus = GetGlobalStatusByTradeGoodType(TradeGoodType);
 
@@ -1141,7 +1140,6 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
         }
 
         float RangeScalingMultiplier = MaxRange != 0.0 ? GlobalStatus.BaseRange / MaxRange : 1.0;
-        float BaseRange = GlobalStatus.BaseRange;
 
         float PositiveModifier = (BuyingModifier >= 1.0) ? Math::Abs(1.0 - BuyingModifier) : 0.0;
         float NegativeModifier = (BuyingModifier < 1.0) ? Math::Abs(1.0 - BuyingModifier) : 0.0;
@@ -1161,8 +1159,8 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             PositiveModifiers = 0.0;
         }
 
-        float Floor = 1.0 - BaseRange + PositiveModifiers;
-        float Ceil = 1.0 + BaseRange - NegativeModifiers;
+        float Floor = 1.0 - GlobalStatus.BaseRange + PositiveModifiers;
+        float Ceil = 1.0 + GlobalStatus.BaseRange - NegativeModifiers;
         float SupplyRatio = MarketStatus.Supply / MarketStatus.Equilibrium;
 
         return Math::RoundToInt(
@@ -1172,7 +1170,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     }
 
     UFUNCTION(BlueprintPure)
-    int32 CalculateSellFinalPrice(ETradeGoodType TradeGoodType, const FTradeGoodStatus& MarketStatus, FName Origin, int32 MinimumPrice) const
+    int32 CalculateSellFinalPrice(ETradeGoodType TradeGoodType, const FMarketGoodStatus& MarketStatus, FName Origin, int32 MinimumPrice=2) const
     {
         FGlobalTradeGoodStatus GlobalStatus = GetGlobalStatusByTradeGoodType(TradeGoodType);
 
@@ -1185,11 +1183,31 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
 
         // Price modifiers after the initial price in the market is always additive
         SellingModifier += MarketStatus.OriginModifiers.Contains(Origin) ? MarketStatus.OriginModifiers[Origin] : 1.0;
+        float RangeScalingMultiplier = MaxRange != 0.0 ? GlobalStatus.BaseRange / MaxRange : 1.0;
 
+        float PositiveModifier = (SellingModifier >= 1.0) ? Math::Abs(1.0 - SellingModifier) : 0.0;
+        float NegativeModifier = (SellingModifier < 1.0) ? Math::Abs(1.0 - SellingModifier) : 0.0;
+
+        float PositiveModifiers = Math::Abs(PositiveModifier) * RangeScalingMultiplier;
+        float NegativeModifiers = Math::Abs(NegativeModifier) * RangeScalingMultiplier;
+
+        // Balancing out modifiers so that the price is pushed in one direction
+        if (PositiveModifiers > NegativeModifiers)
+        {
+            PositiveModifiers -= NegativeModifiers;
+            NegativeModifiers = 0.0;
+        }
+        else
+        {
+            NegativeModifiers -= PositiveModifiers;
+            PositiveModifiers = 0.0;
+        }
+
+        float Floor = 1.0 - GlobalStatus.BaseRange + PositiveModifiers;
+        float Ceil = 1.0 + GlobalStatus.BaseRange - NegativeModifiers;
         float SupplyRatio = MarketStatus.Supply / MarketStatus.Equilibrium;
-
         // Optimization can be done to avoid needlessly calculating the buy price again
-        float GenericBuyPrice = CalculateBuyLogistic(1.0 - GlobalStatus.BaseRange, 1.0 + GlobalStatus.BaseRange, SupplyRatio);
+        float GenericBuyPrice = CalculateBuyLogistic(Floor, Ceil, SupplyRatio);
 
         return Math::RoundToInt(
             Math::Min(
@@ -1199,35 +1217,54 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             float(MinimumPrice)));
     }
 
-    // ==================================================================
-    // ECONOMY: Blueprint bridge
-    //
-    // EconomyLogic is script-side. These are thin forwards so Blueprint callers
-    // that used the old data-table read / UTradeLogic nodes have somewhere to
-    // land. Delete any nothing in Blueprint calls.
-    // ==================================================================
-
-    UFUNCTION(BlueprintPure)
-    FTradeGoodRules GetTradeGoodRules(ETradeGoodType TradeGood) const
+    UFUNCTION()
+    void InitMarket(FName MarketName, FGameplayTag PrimaryRace, FGameplayTag EconomyType, FGameplayTag PoliticalSystem, float Population)
     {
-        return EconomyLogic::GetTradeGoodRules(TradeGood);
-    }
+        FMarket MarketData;
+        MarketData.Name = MarketName;
+        MarketData.Race = PrimaryRace;
+        MarketData.EconomyType = EconomyType;
+        MarketData.PoliticalSystem = PoliticalSystem;
+        MarketData.PopulationMillions = Population;
 
-    UFUNCTION(BlueprintPure)
-    TArray<ETradeGoodType> GetSupplyChainInputs(ETradeGoodType TradeGood) const
-    {
-        return EconomyLogic::GetSupplyChainInputs(TradeGood);
-    }
+        for (int i = 0; i < EconomyLogic::TradeGoodCount; i++)
+        {
+            ETradeGoodType TradeGood = ETradeGoodType(i);
+            FMarketGoodStatus GoodStatus;
 
-    UFUNCTION(BlueprintPure)
-    bool IsLegal(ETradeGoodType TradeGood, ERaceType Race, EPoliticalSystem PoliticalSystem) const
-    {
-        return EconomyLogic::IsLegal(TradeGood, Race, PoliticalSystem);
-    }
+            FTradeGoodRules GoodRules = EconomyLogic::GetTradeGoodRules(TradeGood);
+            FProducerSpawnRules SpawnRules = EconomyLogic::GetProducerSpawnRules(TradeGood);
 
-    UFUNCTION(BlueprintPure)
-    bool IsEssential(ETradeGoodType TradeGood, ERaceType Race) const
-    {
-        return EconomyLogic::IsEssential(TradeGood, Race);
+            // Politics & Development modifiers from producer spawn rules
+            int PoliticsBonus = EconomyLogic::GetProducerPoliticsSpawnBonus(SpawnRules, PoliticalSystem);
+            int DevelopmentBonus = EconomyLogic::GetProducerDevelopmentSpawnBonus(SpawnRules, EconomyType);
+            int BonusAmount = Math::Max(0, SpawnRules.BaseAmount + PoliticsBonus + DevelopmentBonus);
+
+            float EquilibriumModifier = EconomyLogic::IsLegal(TradeGood, PrimaryRace, PoliticalSystem) ? Math::Max(BonusAmount, 1) /  SpawnRules.BaseAmount + 1 : 1.0;
+            float RawEquilibrium = EquilibriumModifier * EconomyLogic::BaseTradeGoodsAmount * (Population / 1000.0 / GoodRules.BasePrice);
+            float VarianceRoll = GameMath::RandomNormalInRange(1 - EconomyLogic::EquilibriumVariance, 1 + EconomyLogic::EquilibriumVariance);
+
+            float Equilibrium = Math::Max(1.0, Math::RoundToFloat(RawEquilibrium * VarianceRoll));
+
+            // Supply spread & total supply
+            float SupplySpread = GameMath::RandomNormalInRange(EconomyLogic::LowSupplySpread, EconomyLogic::HighSupplySpread);
+            float ProducerBoost = Math::Clamp(Math::Sqrt(Math::Max(BonusAmount / (SpawnRules.BaseAmount + 1), 1)), 0, 1);
+            float Supply = Math::RoundToFloat(Equilibrium * SupplySpread * ProducerBoost);
+
+            GoodStatus.bIsEssential = EconomyLogic::IsEssential(TradeGood, PrimaryRace);
+            GoodStatus.bIsLegal = EconomyLogic::IsLegal(TradeGood, PrimaryRace, PoliticalSystem);
+            GoodStatus.Equilibrium = Equilibrium;
+            GoodStatus.Supply = Supply;
+            GoodStatus.LastBuySupply = Supply;
+            GoodStatus.LastSellSupply = Supply;
+            GoodStatus.SupplyRatio = Supply / Equilibrium;
+            GoodStatus.Situation = EconomyLogic::GetSituation(GoodStatus.SupplyRatio);
+            GoodStatus.BuyPrice = CalculateBuyFinalPrice(TradeGood, GoodStatus);
+            GoodStatus.SellPrice = CalculateSellFinalPrice(TradeGood, GoodStatus, MarketName);
+
+            // TODO: Complete remaining clipped right-edge nodes (situation/bracketed quantity/price fields)
+            MarketData.MarketGoods.Add(TradeGood, GoodStatus);
+        }
+        GlobalMarkets.Add(MarketData);
     }
 }

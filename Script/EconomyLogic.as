@@ -127,17 +127,21 @@ struct FTradeModifier
 };
 
 // One trade good inside one market.
-struct FTradeGoodStatus
+struct FMarketGoodStatus
 {
-    UPROPERTY() bool Essential = false;
-    UPROPERTY() bool Legal = true;
+    UPROPERTY() bool bIsEssential = false;
+    UPROPERTY() bool bIsLegal = true;
     UPROPERTY() float Equilibrium = 1000.0;
     UPROPERTY() float Supply = 1000.0;
     UPROPERTY() float CirculatingQuantity = 0.0;
+    UPROPERTY() float BuyPricePoint = 0.0;
+    UPROPERTY() float SellPricePoint = 0.0;
     UPROPERTY() float BuyPrice = 0.0;
     UPROPERTY() float SellPrice = 0.0;
     UPROPERTY() float LastBuySupply = 1000.0;
     UPROPERTY() float LastSellSupply = 1000.0;
+    UPROPERTY() float SupplyRatio = 1.0;
+    UPROPERTY() EEconomySituation Situation;
     UPROPERTY() TArray<FTradeModifier> BuyModifiers;
     UPROPERTY() TArray<FTradeModifier> SellModifiers;
     UPROPERTY() TMap<FName, float> OriginModifiers;
@@ -166,8 +170,82 @@ struct FMarket
     UPROPERTY() EEconomyType EconomyType;
     UPROPERTY() EPoliticalSystem PoliticalSystem;
     UPROPERTY() float PopulationMillions = 0.0;
-    UPROPERTY() TArray<FTradeGoodStatus> MarketGoods;
+    UPROPERTY() TArray<FMarketGoodStatus> MarketGoods;
     UPROPERTY() TArray<int32> ProducerIndexes; // We create a global list of producers and then assign to markets the indexes
+};
+
+// How many producers spawn for a trade good (was a DT_ProducerSpawnRules row).
+// Modifiers are added to BaseAmount; use GetSpawnCount().
+struct FProducerSpawnRules
+{
+    UPROPERTY() int BaseAmount = 0;
+
+    UPROPERTY() int PoliticsTheocracy = 0;
+    UPROPERTY() int PoliticsAnarchy = 0;
+    UPROPERTY() int PoliticsMonarchy = 0;
+    UPROPERTY() int PoliticsDictatorship = 0;
+    UPROPERTY() int PoliticsOligarchy = 0;
+    UPROPERTY() int PoliticsDemocracy = 0;
+
+    UPROPERTY() int DevelopmentExtractive = 0;
+    UPROPERTY() int DevelopmentIndustrial = 0;
+    UPROPERTY() int DevelopmentMixed = 0;
+    UPROPERTY() int DevelopmentAgrarian = 0;
+
+    FProducerSpawnRules() {}
+
+    // Argument order matches the CSV columns, so rows can be checked against it line by line.
+    FProducerSpawnRules(int InBaseAmount,
+        int InTheocracy, int InAnarchy, int InMonarchy, int InDictatorship, int InOligarchy, int InDemocracy,
+        int InExtractive, int InIndustrial, int InMixed, int InAgrarian)
+    {
+        BaseAmount = InBaseAmount;
+
+        PoliticsTheocracy = InTheocracy;
+        PoliticsAnarchy = InAnarchy;
+        PoliticsMonarchy = InMonarchy;
+        PoliticsDictatorship = InDictatorship;
+        PoliticsOligarchy = InOligarchy;
+        PoliticsDemocracy = InDemocracy;
+
+        DevelopmentExtractive = InExtractive;
+        DevelopmentIndustrial = InIndustrial;
+        DevelopmentMixed = InMixed;
+        DevelopmentAgrarian = InAgrarian;
+    }
+
+    int GetPoliticsModifier(EPoliticalSystem Politics) const
+    {
+        switch (Politics)
+        {
+            case EPoliticalSystem::Theocracy:    return PoliticsTheocracy;
+            case EPoliticalSystem::Anarchy:      return PoliticsAnarchy;
+            case EPoliticalSystem::Monarchy:     return PoliticsMonarchy;
+            case EPoliticalSystem::Dictatorship: return PoliticsDictatorship;
+            case EPoliticalSystem::Oligarchy:    return PoliticsOligarchy;
+            case EPoliticalSystem::Democracy:    return PoliticsDemocracy;
+        }
+        return 0;
+    }
+
+    int GetDevelopmentModifier(EEconomyType Economy) const
+    {
+        switch (Economy)
+        {
+            case EEconomyType::Extractive: return DevelopmentExtractive;
+            case EEconomyType::Industrial: return DevelopmentIndustrial;
+            case EEconomyType::Mixed:      return DevelopmentMixed;
+            case EEconomyType::Agrarian:   return DevelopmentAgrarian;
+        }
+        return 0; // Resort wasn't in the table
+    }
+
+    // ASSUMPTION: modifiers are additive and the result is floored at 0 (the -10
+    // Theocracy entries read as "none"). Change this if you combine them differently.
+    int GetSpawnCount(EPoliticalSystem Politics, EEconomyType Economy) const
+    {
+        return Math::Max(0, BaseAmount + GetPoliticsModifier(Politics) + GetDevelopmentModifier(Economy));
+    }
 };
 
 
@@ -307,6 +385,7 @@ namespace EconomyLogic
 
     // Goods required to produce this good. Kept out of FGlobalTradeGoodStatus so
     // that struct stays plain floats (cheap to copy on every price calculation).
+    UFUNCTION(BlueprintPure)
     TArray<ETradeGoodType> GetSupplyChainInputs(ETradeGoodType TradeGood)
     {
         TArray<ETradeGoodType> Inputs;
@@ -530,6 +609,7 @@ namespace EconomyLogic
         return BaseMultiplier * SupplyFactor * SupplyChainMultiplier;
     }
 
+    UFUNCTION(BlueprintPure)
     bool IsLegal(ETradeGoodType TradeGood, ERaceType Race, EPoliticalSystem PoliticalSystem)
     {
         // Absolute legality: Peleng race or Anarchy political system
@@ -583,9 +663,98 @@ namespace EconomyLogic
         return true;
     }
 
+    UFUNCTION(BlueprintPure)
     bool IsEssential(ETradeGoodType TradeGood, ERaceType Race)
     {
         TArray<ETradeGoodType> Goods = GetEssentialGoods(Race);
         return Goods.Contains(TradeGood);
+    }
+
+    UFUNCTION(BlueprintPure)
+    EEconomySituation GetSituation(float SupplyRatio=1.0)
+    {
+        if      (SupplyRatio < MajorDeficitSupplyRatio)
+            return EEconomySituation::MajorDeficit;
+        else if (SupplyRatio < DeficitSupplyRatio)
+            return EEconomySituation::Deficit;
+        else if (SupplyRatio < SurplusSupplyRatio)
+            return EEconomySituation::Balanced;
+        else if (SupplyRatio < MajorSurplusSupplyRatio)
+            return EEconomySituation::Surplus;
+        else
+            return EEconomySituation::MajorSurplus;
+    }
+
+    UFUNCTION()
+    float GetBracketedQuantity(EEconomySituation Situation, float Equilibrium=1.0)
+    {
+        switch (Situation)
+        {
+            case EEconomySituation::Balanced:
+                return Equilibrium;
+            case EEconomySituation::Deficit:
+                return Equilibrium * DeficitSupplyRatio;
+            case EEconomySituation::MajorDeficit:
+                return Equilibrium * MajorDeficitSupplyRatio;
+            case EEconomySituation::Surplus:
+                return Equilibrium * SurplusSupplyRatio;
+            case EEconomySituation::MajorSurplus:
+                return Equilibrium * MajorSurplusSupplyRatio;
+        }
+    }
+
+        // Producers spawned per trade good, before politics / development modifiers.
+    //                                                                  Base |  Theo Anar Mona Dict Olig Demo |  Extr Indu Mixd Agra
+    FProducerSpawnRules GetProducerSpawnRules(ETradeGoodType TradeGood)
+    {
+        switch (TradeGood)
+        {
+            case ETradeGoodType::EssentialGoods:  return FProducerSpawnRules(4,   0,  0, -1, -1,  2,  1,   0,  0,  0,  3);
+            case ETradeGoodType::Medicine:        return FProducerSpawnRules(3,  -2,  0, -1,  0,  1,  2,   0,  0,  1,  0);
+            case ETradeGoodType::Organics:        return FProducerSpawnRules(3,   1,  0, -1, -1,  1,  1,   0, -1,  0,  2);
+            case ETradeGoodType::Synthetics:      return FProducerSpawnRules(3,   0,  0, -1,  2,  1,  0,   0,  1,  2,  0);
+            case ETradeGoodType::CommonMinerals:  return FProducerSpawnRules(4,   1,  0,  1,  2,  0, -1,   0, -1,  0,  1);
+            case ETradeGoodType::RareMinerals:    return FProducerSpawnRules(2,   1,  0, -1,  0,  1,  1,   0,  1,  0, -1);
+            case ETradeGoodType::RefinedMinerals: return FProducerSpawnRules(3,   1,  0, -1, -1,  1,  2,   0,  1,  0,  0);
+            case ETradeGoodType::ViceGoods:       return FProducerSpawnRules(2,  -2,  1, -1, -1,  0,  0,   0,  0,  1,  0);
+            case ETradeGoodType::Microchips:      return FProducerSpawnRules(2, -10,  0,  0, -1,  1,  2,   0,  2,  0, -1);
+            case ETradeGoodType::ConsumerTech:    return FProducerSpawnRules(2, -10,  0,  0, -1,  1,  2,   0,  2,  0, -1);
+            case ETradeGoodType::HeavyMachinery:  return FProducerSpawnRules(1, -10, -3,  0,  0,  1,  1,   0,  1, -1, -3);
+            case ETradeGoodType::LuxuryGoods:     return FProducerSpawnRules(2,   2,  1,  0,  0,  1,  1,   0,  1,  2, -1);
+            case ETradeGoodType::Fuel:            return FProducerSpawnRules(4,  -1,  0, -1, -1,  1,  1,   0,  0,  1,  0);
+            case ETradeGoodType::Ammunition:      return FProducerSpawnRules(3,  -1,  1,  1,  1,  1,  0,   0,  1,  0,  0);
+            case ETradeGoodType::EquipmentParts:  return FProducerSpawnRules(2, -10,  0,  0, -1,  1,  1,   0,  2,  0, -1);
+            case ETradeGoodType::Weapons:         return FProducerSpawnRules(3,  -1,  1,  1,  1,  0,  0,   0,  1,  0,  0);
+            case ETradeGoodType::Narcotics:       return FProducerSpawnRules(1,  -1,  2, -1, -2, -1,  0,   0, -1,  0,  1);
+        }
+
+        return FProducerSpawnRules(); // NoType / anything unlisted: spawns none
+    }
+
+    int GetProducerPoliticsSpawnBonus(const FProducerSpawnRules& Rules, EPoliticalSystem PoliticalSystem)
+    {
+        switch (PoliticalSystem)
+        {
+            case EPoliticalSystem::Theocracy:    return Rules.PoliticsTheocracy;
+            case EPoliticalSystem::Anarchy:      return Rules.PoliticsAnarchy;
+            case EPoliticalSystem::Monarchy:     return Rules.PoliticsMonarchy;
+            case EPoliticalSystem::Dictatorship: return Rules.PoliticsDictatorship;
+            case EPoliticalSystem::Oligarchy:    return Rules.PoliticsOligarchy;
+            case EPoliticalSystem::Democracy:    return Rules.PoliticsDemocracy;
+            default:                             return 0;
+        }
+    }
+
+    int GetProducerDevelopmentSpawnBonus(const FProducerSpawnRules& Rules, EEconomyType EconomyType)
+    {
+        switch (EconomyType)
+        {
+            case EEconomyType::Extractive: return Rules.DevelopmentExtractive;
+            case EEconomyType::Industrial: return Rules.DevelopmentIndustrial;
+            case EEconomyType::Mixed:      return Rules.DevelopmentMixed;
+            case EEconomyType::Agrarian:   return Rules.DevelopmentAgrarian;
+            case EEconomyType::Resort:     return 0; // Add a field on FProducerSpawnRules if Resort has one
+            default:                       return 0;
+        }
     }
 }
