@@ -81,7 +81,8 @@ class UItemEquipment : UItemFragment
     // clean stats cost one branch each.
     void RecalculateStats()
     {
-        for (auto& Stat : Stats)
+        //assuming unique stat types
+        for (auto& Stat : Stats) 
         {
             if (!Stat.bDirty)
                 continue;

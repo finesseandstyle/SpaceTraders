@@ -225,7 +225,6 @@ struct FProducerSpawnRules
             case EPoliticalSystem::Oligarchy:    return PoliticsOligarchy;
             case EPoliticalSystem::Democracy:    return PoliticsDemocracy;
         }
-        return 0;
     }
 
     int GetDevelopmentModifier(EEconomyType Economy) const
@@ -236,8 +235,8 @@ struct FProducerSpawnRules
             case EEconomyType::Industrial: return DevelopmentIndustrial;
             case EEconomyType::Mixed:      return DevelopmentMixed;
             case EEconomyType::Agrarian:   return DevelopmentAgrarian;
+            default:                       return 0;
         }
-        return 0; // Resort wasn't in the table
     }
 
     // ASSUMPTION: modifiers are additive and the result is floored at 0 (the -10
@@ -726,9 +725,8 @@ namespace EconomyLogic
             case ETradeGoodType::EquipmentParts:  return FProducerSpawnRules(2, -10,  0,  0, -1,  1,  1,   0,  2,  0, -1);
             case ETradeGoodType::Weapons:         return FProducerSpawnRules(3,  -1,  1,  1,  1,  0,  0,   0,  1,  0,  0);
             case ETradeGoodType::Narcotics:       return FProducerSpawnRules(1,  -1,  2, -1, -2, -1,  0,   0, -1,  0,  1);
+            default:                              return FProducerSpawnRules(); // NoType / anything unlisted: spawns none
         }
-
-        return FProducerSpawnRules(); // NoType / anything unlisted: spawns none
     }
 
     int GetProducerPoliticsSpawnBonus(const FProducerSpawnRules& Rules, EPoliticalSystem PoliticalSystem)

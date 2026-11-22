@@ -1218,7 +1218,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     }
 
     UFUNCTION()
-    void InitMarket(FName MarketName, FGameplayTag PrimaryRace, FGameplayTag EconomyType, FGameplayTag PoliticalSystem, float Population)
+    void InitMarket(FName MarketName, ERaceType PrimaryRace, EEconomyType EconomyType, EPoliticalSystem PoliticalSystem, float Population)
     {
         FMarket MarketData;
         MarketData.Name = MarketName;
@@ -1240,7 +1240,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             int DevelopmentBonus = EconomyLogic::GetProducerDevelopmentSpawnBonus(SpawnRules, EconomyType);
             int BonusAmount = Math::Max(0, SpawnRules.BaseAmount + PoliticsBonus + DevelopmentBonus);
 
-            float EquilibriumModifier = EconomyLogic::IsLegal(TradeGood, PrimaryRace, PoliticalSystem) ? Math::Max(BonusAmount, 1) /  SpawnRules.BaseAmount + 1 : 1.0;
+            float EquilibriumModifier = EconomyLogic::IsLegal(TradeGood, PrimaryRace, PoliticalSystem) ? Math::Max(BonusAmount, 1) /  float(SpawnRules.BaseAmount) + 1 : 1.0;
             float RawEquilibrium = EquilibriumModifier * EconomyLogic::BaseTradeGoodsAmount * (Population / 1000.0 / GoodRules.BasePrice);
             float VarianceRoll = GameMath::RandomNormalInRange(1 - EconomyLogic::EquilibriumVariance, 1 + EconomyLogic::EquilibriumVariance);
 
@@ -1248,7 +1248,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
 
             // Supply spread & total supply
             float SupplySpread = GameMath::RandomNormalInRange(EconomyLogic::LowSupplySpread, EconomyLogic::HighSupplySpread);
-            float ProducerBoost = Math::Clamp(Math::Sqrt(Math::Max(BonusAmount / (SpawnRules.BaseAmount + 1), 1)), 0, 1);
+            float ProducerBoost = Math::Clamp(Math::Sqrt(Math::Max(BonusAmount / (float(SpawnRules.BaseAmount) + 1), 1)), 0, 1);
             float Supply = Math::RoundToFloat(Equilibrium * SupplySpread * ProducerBoost);
 
             GoodStatus.bIsEssential = EconomyLogic::IsEssential(TradeGood, PrimaryRace);
@@ -1263,7 +1263,7 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             GoodStatus.SellPrice = CalculateSellFinalPrice(TradeGood, GoodStatus, MarketName);
 
             // TODO: Complete remaining clipped right-edge nodes (situation/bracketed quantity/price fields)
-            MarketData.MarketGoods.Add(TradeGood, GoodStatus);
+            MarketData.MarketGoods.Add(GoodStatus);
         }
         GlobalMarkets.Add(MarketData);
     }

@@ -148,15 +148,6 @@ namespace GameLogic
         return Output;
     }
 
-    // ── Reliability speed multiplier (hull only) ──────────────────────────────────
-
-    float GetReliabilitySpeedMultiplier(float Reliability)
-    {
-        if (Reliability < GHullReliabilityThreshold_Critical) return GHullReliabilitySpeedMult_Critical; // <10%
-        if (Reliability < GHullReliabilityThreshold_Major)    return GHullReliabilitySpeedMult_Major;     // <25%
-        return 1; // healthy — no penalty
-    }
-
     // ── Target energy buildup ─────────────────────────────────────────────────────
 
     float CalculateTargetEnergyBuildup(
@@ -168,8 +159,7 @@ namespace GameLogic
 
     // ── Ship speed (Space Rangers HD derived) ──────────────────────────────────
     /**
-     * ShipBaseSpeed - Includes Base Speed + potential Upgrades and Micromodule effects.
-     *                The hull item's own FStatAttribute for Speed's Value is this.
+     * ShipBaseSpeed - Includes Base Speed + potential Upgrades and Micromodule effects (not including global effects)
      * ShipMass - Calculated from ShipState's CurrentMass (GetTotalShipMass())
      * SlowdownMultiplier - OnHitEffects that reduce our SlowdownMultiplier to a min of 0.5
      * ShipReliability - Replaces SRHD's Engine broken check, either 1.0, 0.75 or 0.3 depending on threshold
@@ -179,13 +169,13 @@ namespace GameLogic
     float GetShipSpeed(float ShipBaseSpeed, float ShipMass, float SlowdownMultiplier, bool bEngineOperational, 
         float MultiplierBonuses, float FlatBonuses)
     {
-        float k_weight = Math::GetMappedRangeValueClamped(FVector2D(MaxSpeedMass, MinSpeedMass), FVector2D(1.0, MaxMassPenaltyMultiplier), ShipMass);
+        float k_mass = Math::GetMappedRangeValueClamped(FVector2D(MaxSpeedMass, MinSpeedMass), FVector2D(1.0, MaxMassPenaltyMultiplier), ShipMass);
         float k_slowdown = Math::Clamp(SlowdownMultiplier, 0.5, 1.0);
         float k_broken = bEngineOperational ? 1.0 : 0.3;
         
 
         // SpeedCoeficient = e^(-4thRoot( Sum( ln^4(k_i) ) ))
-        float SumLn4 = Math::Pow(Math::Loge(k_weight), 4.0);
+        float SumLn4 = Math::Pow(Math::Loge(k_mass), 4.0);
         SumLn4 += Math::Pow(Math::Loge(k_slowdown), 4.0);
         SumLn4 += Math::Pow(Math::Loge(k_broken), 4.0);
         //Aggregate negative custom multipliers here , positive ones are calculated below
