@@ -13,14 +13,17 @@
  *  - Click an arrow: scrolls one step.
  *  - Hold an arrow: after the repeat delay (default 0.5 s) it keeps scrolling until released or
  *    the end of the list is reached.
- *  - Arrow buttons are styled with per-state brushes, like the scroll bar handle.
+ *  - Arrow buttons are styled with per-state brushes, like the scroll bar handle (built-in arrow
+ *    textures are used for anything left empty).
+ *  - The side bar (arrows + track) can have its own background brush.
  *  - "Always Show Scroll Bar": keeps the arrows on screen (greyed out, track hidden) when there is
  *    not enough content to scroll.
  *
- * The scroll bar itself (thumb / track) still uses the list's regular "Scroll Bar Style".
+ * The scroll bar itself (thumb / track) still uses the list's regular "Scroll Bar Style", and that
+ * style's Thickness is also the size of the arrow buttons and of the whole side bar.
  */
 UCLASS(meta = (DisplayName = "Scroll Arrow List View", EntryInterface = "/Script/UMG.UserObjectListEntry"))
-class SPACETRADERS_API UScrollArrowListView : public UListView   // <-- replace MYGAME_API with YOURMODULE_API
+class SPACETRADERS_API UScrollArrowListView : public UListView
 {
 	GENERATED_BODY()
 
@@ -54,7 +57,19 @@ public:
 
 	// ---- Style ---------------------------------------------------------------------------
 
-	/** Use the start button style (up / left) for the end button (down / right) too. */
+	/**
+	 * Background drawn behind the whole side bar (arrow buttons + track). Unlike the list's own
+	 * background it only exists while the side bar is on screen. Set "Draw As" to something other
+	 * than None to enable it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Scroll Arrows|Style")
+	FSlateBrush SideBarBackground;
+
+	/**
+	 * Use the start button style (up / left) for the end button (down / right) too.
+	 * Untick this if you assign your own arrow textures, so each button can get its own direction.
+	 * (The built-in arrows always point the right way either way.)
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Scroll Arrows|Style")
 	bool bUseSameStyleForBothButtons = true;
 
@@ -73,6 +88,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Scroll Arrows")
 	bool GetAlwaysShowScrollBar() const { return bAlwaysShowScrollBar; }
+
+	UFUNCTION(BlueprintCallable, Category = "Scroll Arrows")
+	void SetSideBarBackground(const FSlateBrush& InBrush);
 
 	UFUNCTION(BlueprintCallable, Category = "Scroll Arrows")
 	void SetStartButtonStyle(const FScrollArrowButtonStyle& InStyle);

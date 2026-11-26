@@ -4,6 +4,8 @@
 UScrollArrowListView::UScrollArrowListView(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	// Invisible by default; the user opts in by picking a brush.
+	SideBarBackground.DrawAs = ESlateBrushDrawType::NoDrawType;
 }
 
 TSharedRef<STableViewBase> UScrollArrowListView::RebuildListWidget()
@@ -37,6 +39,7 @@ FScrollArrowBarSettings UScrollArrowListView::MakeSlateSettings() const
 	Settings.ClickScrollAmount = ClickScrollAmount;
 	Settings.HoldRepeatDelay = HoldRepeatDelay;
 	Settings.HoldScrollSpeed = HoldScrollSpeed;
+	Settings.SideBarBackground = SideBarBackground;
 	Settings.StartButtonStyle = StartButtonStyle;
 	Settings.EndButtonStyle = bUseSameStyleForBothButtons ? StartButtonStyle : EndButtonStyle;
 	return Settings;
@@ -53,6 +56,12 @@ void UScrollArrowListView::ApplyArrowSettings()
 void UScrollArrowListView::SetAlwaysShowScrollBar(bool bInAlwaysShowScrollBar)
 {
 	bAlwaysShowScrollBar = bInAlwaysShowScrollBar;
+	ApplyArrowSettings();
+}
+
+void UScrollArrowListView::SetSideBarBackground(const FSlateBrush& InBrush)
+{
+	SideBarBackground = InBrush;
 	ApplyArrowSettings();
 }
 

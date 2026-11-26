@@ -2,30 +2,28 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Styling/ISlateStyle.h"
 #include "Styling/SlateTypes.h"
+#include "Styling/SlateWidgetStyleAsset.h" // SLATE_STYLE_ARGUMENT needs USlateWidgetStyleAsset to be complete
 #include "Types/SlateEnums.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "Widgets/SCompoundWidget.h"
-#include "Widgets/SLeafWidget.h"
 #include "ScrollArrowButtonStyle.h"
-#include "Styling/SlateWidgetStyleAsset.h"
-#include "Styling/SlateStyle.h"
+#include "ScrollArrowDefaultTextures.h" // EScrollArrowDirection
 
+class SBorder;
 class SBox;
 class SButton;
 class SScrollBar;
 
-enum class EScrollArrowDirection : uint8
-{
-	Up,
-	Down,
-	Left,
-	Right
-};
-
 /** Plain-C++ mirror of everything the designer can configure; pushed into the Slate widget. */
 struct FScrollArrowBarSettings
 {
+	FScrollArrowBarSettings()
+	{
+		SideBarBackground.DrawAs = ESlateBrushDrawType::NoDrawType; // invisible unless the user opts in
+	}
+
 	/** Keep the arrow bar on screen (buttons greyed out, track hidden) when nothing can scroll. */
 	bool bAlwaysShowScrollBar = false;
 
@@ -41,6 +39,9 @@ struct FScrollArrowBarSettings
 	/** Items per second scrolled while the button is held past the repeat delay. */
 	float HoldScrollSpeed = 12.0f;
 
+	/** Drawn behind the whole bar (arrows + track) whenever the bar is visible. */
+	FSlateBrush SideBarBackground;
+
 	FScrollArrowButtonStyle StartButtonStyle;
 	FScrollArrowButtonStyle EndButtonStyle;
 };
@@ -49,36 +50,11 @@ struct FScrollArrowBarSettings
 DECLARE_DELEGATE_OneParam(FOnScrollArrowScroll, float /*DeltaInItems*/);
 
 /**
- * Small leaf widget that paints the arrow glyph. Tint comes from the parent button's
- * foreground colour, so it follows the hover / pressed / disabled state automatically.
- */
-class SScrollArrowGlyph : public SLeafWidget
-{
-public:
-	SLATE_BEGIN_ARGS(SScrollArrowGlyph)
-		: _Direction(EScrollArrowDirection::Up)
-	{}
-		SLATE_ARGUMENT(EScrollArrowDirection, Direction)
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs);
-	void SetStyle(const FScrollArrowButtonStyle& InStyle);
-
-	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
-		FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
-	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override;
-
-private:
-	bool HasImage() const;
-
-	EScrollArrowDirection Direction = EScrollArrowDirection::Up;
-	FSlateBrush ArrowImage;
-	FVector2D GlyphSize = FVector2D(8.0, 8.0);
-	float LineThickness = 2.0f;
-};
-
-/**
- * [Start arrow] [ SScrollBar ] [End arrow]  (stacked vertically, or side by side when horizontal).
+ * [Start arrow] [ SScrollBar ] [End arrow]  (stacked vertically, or side by side when horizontal),
+ * on top of an optional background brush.
+ *
+ * The bar is exactly "Scroll Bar Style -> Thickness" wide (tall when horizontal): the arrows, the
+ * track and the background all share that size, so nothing shifts when the thumb appears.
  *
  * The inner SScrollBar is handed to the list view as its ExternalScrollbar, so the list drives the
  * thumb and handles dragging exactly like the stock scroll bar does.
@@ -109,14 +85,12 @@ private:
 	// Visibility / state bindings
 	EVisibility GetBarVisibility() const;
 	EVisibility GetTrackVisibility() const;
+	FOptionalSize GetBarThickness() const;
 	bool CanScrollInDirection(bool bTowardsEnd) const;
 	bool IsArrowEnabled(bool bIsEnd) const;
-	FSlateColor GetArrowForeground(bool bIsEnd) const;
 
 	bool IsStartEnabled() const { return IsArrowEnabled(false); }
 	bool IsEndEnabled() const { return IsArrowEnabled(true); }
-	FSlateColor GetStartForeground() const { return GetArrowForeground(false); }
-	FSlateColor GetEndForeground() const { return GetArrowForeground(true); }
 
 	// Press / hold handling
 	void HandleStartPressed() { BeginHold(false); }
@@ -130,25 +104,24 @@ private:
 	EActiveTimerReturnType HandleHoldTimer(double InCurrentTime, float InDeltaTime);
 
 	// Construction helpers
+	EScrollArrowDirection GetDirection(bool bIsEnd) const;
 	TSharedRef<SWidget> MakeArrowButton(bool bIsEnd);
 	void ApplyStyles();
-	void ConfigureButton(const TSharedPtr<SButton>& Button, const TSharedPtr<SBox>& SizeBox,
-		const TSharedPtr<SScrollArrowGlyph>& Glyph, FButtonStyle& SlateStyle, const FScrollArrowButtonStyle& Style) const;
+	void ConfigureButton(const TSharedPtr<SButton>& Button, FButtonStyle& SlateStyle,
+		const FScrollArrowButtonStyle& Style, EScrollArrowDirection Direction) const;
 
 private:
 	EOrientation Orientation = Orient_Vertical;
 	FOnScrollArrowScroll OnScroll;
 	TAttribute<EVisibility> UserScrollbarVisibility;
+	const FScrollBarStyle* BarStyle = nullptr;
 	FScrollArrowBarSettings Settings;
 
+	TSharedPtr<SBorder> BackgroundBorder;
 	TSharedPtr<SScrollBar> ScrollBar;
 
 	TSharedPtr<SButton> StartButton;
 	TSharedPtr<SButton> EndButton;
-	TSharedPtr<SBox> StartSizeBox;
-	TSharedPtr<SBox> EndSizeBox;
-	TSharedPtr<SScrollArrowGlyph> StartGlyph;
-	TSharedPtr<SScrollArrowGlyph> EndGlyph;
 
 	// Owned here so the buttons can keep a stable pointer to their style.
 	FButtonStyle StartSlateStyle;

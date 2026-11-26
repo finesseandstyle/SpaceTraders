@@ -1,9 +1,9 @@
 // SScrollArrowBar.cpp
 #include "SScrollArrowBar.h"
 
-#include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBar.h"
 #include "Widgets/SBoxPanel.h"
@@ -12,109 +12,57 @@ namespace
 {
 	// Fractions of the scroll track; tight enough to be exact for lists with 100k+ items.
 	constexpr float LimitTolerance = 1.e-5f;
-}
 
-// ---------------------------------------------------------------------------------------------
-// SScrollArrowGlyph
-// ---------------------------------------------------------------------------------------------
+	// Per-state tint multipliers used when a state has no image of its own.
+	const FLinearColor NormalStateTint(1.0f, 1.0f, 1.0f, 1.0f);
+	const FLinearColor HoveredStateTint(1.4f, 1.4f, 1.4f, 1.0f);
+	const FLinearColor PressedStateTint(0.7f, 0.7f, 0.7f, 1.0f);
+	const FLinearColor DisabledStateTint(0.45f, 0.45f, 0.45f, 0.5f);
 
-void SScrollArrowGlyph::Construct(const FArguments& InArgs)
-{
-	Direction = InArgs._Direction;
-}
+	// The built-in arrow texture is pure white; this makes its idle colour a soft grey.
+	const FLinearColor BuiltInArrowBaseTint(0.7f, 0.7f, 0.7f, 1.0f);
 
-void SScrollArrowGlyph::SetStyle(const FScrollArrowButtonStyle& InStyle)
-{
-	ArrowImage = InStyle.ArrowImage;
-	GlyphSize = InStyle.ArrowSize;
-	LineThickness = InStyle.ArrowLineThickness;
-	Invalidate(EInvalidateWidgetReason::Layout);
-}
-
-bool SScrollArrowGlyph::HasImage() const
-{
-	return ArrowImage.GetResourceObject() != nullptr || !ArrowImage.GetResourceName().IsNone();
-}
-
-FVector2D SScrollArrowGlyph::ComputeDesiredSize(float /*LayoutScaleMultiplier*/) const
-{
-	return GlyphSize;
-}
-
-int32 SScrollArrowGlyph::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
-	FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
-{
-	const bool bEnabled = ShouldBeEnabled(bParentEnabled);
-	const ESlateDrawEffect DrawEffects = bEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect;
-
-	// The parent SButton publishes its per-state colour as the "foreground" colour.
-	const FLinearColor Tint = InWidgetStyle.GetColorAndOpacityTint() * FSlateColor::UseForeground().GetColor(InWidgetStyle);
-
-	const FVector2f LocalSize = AllottedGeometry.GetLocalSize();
-	const FVector2f Size(static_cast<float>(GlyphSize.X), static_cast<float>(GlyphSize.Y));
-	const FVector2f Center = LocalSize * 0.5f;
-
-	if (HasImage())
+	/** A brush the user has not touched: "Draw As = Image" with no texture. */
+	bool IsUnsetBrush(const FSlateBrush& Brush)
 	{
-		const FVector2f TopLeft = Center - Size * 0.5f;
-		FSlateDrawElement::MakeBox(
-			OutDrawElements,
-			LayerId,
-			AllottedGeometry.ToPaintGeometry(Size, FSlateLayoutTransform(TopLeft)),
-			&ArrowImage,
-			DrawEffects,
-			Tint * ArrowImage.GetTint(InWidgetStyle));
+		return Brush.DrawAs == ESlateBrushDrawType::Image
+			&& Brush.GetResourceObject() == nullptr
+			&& Brush.GetResourceName().IsNone();
 	}
-	else
+
+	/**
+	 * Picks what a state really draws:
+	 *   - the user's brush if they set one,
+	 *   - else the Normal brush if it has a texture (tinted for this state),
+	 *   - else the built-in arrow for this button's direction.
+	 */
+	FSlateBrush ResolveBrush(const FSlateBrush& StateBrush, const FSlateBrush& NormalBrush,
+		EScrollArrowDirection Direction, const FLinearColor& StateTint)
 	{
-		const float Hx = Size.X * 0.5f;
-		const float Hy = Size.Y * 0.5f;
-
-		TArray<FVector2f> Points;
-		Points.Reserve(3);
-
-		switch (Direction)
+		if (!IsUnsetBrush(StateBrush))
 		{
-		case EScrollArrowDirection::Up:
-			Points.Add(FVector2f(Center.X - Hx, Center.Y + Hy * 0.5f));
-			Points.Add(FVector2f(Center.X,      Center.Y - Hy * 0.5f));
-			Points.Add(FVector2f(Center.X + Hx, Center.Y + Hy * 0.5f));
-			break;
-		case EScrollArrowDirection::Down:
-			Points.Add(FVector2f(Center.X - Hx, Center.Y - Hy * 0.5f));
-			Points.Add(FVector2f(Center.X,      Center.Y + Hy * 0.5f));
-			Points.Add(FVector2f(Center.X + Hx, Center.Y - Hy * 0.5f));
-			break;
-		case EScrollArrowDirection::Left:
-			Points.Add(FVector2f(Center.X + Hx * 0.5f, Center.Y - Hy));
-			Points.Add(FVector2f(Center.X - Hx * 0.5f, Center.Y));
-			Points.Add(FVector2f(Center.X + Hx * 0.5f, Center.Y + Hy));
-			break;
-		case EScrollArrowDirection::Right:
-		default:
-			Points.Add(FVector2f(Center.X - Hx * 0.5f, Center.Y - Hy));
-			Points.Add(FVector2f(Center.X + Hx * 0.5f, Center.Y));
-			Points.Add(FVector2f(Center.X - Hx * 0.5f, Center.Y + Hy));
-			break;
+			return StateBrush;
 		}
 
-		FSlateDrawElement::MakeLines(
-			OutDrawElements,
-			LayerId,
-			AllottedGeometry.ToPaintGeometry(),
-			Points,
-			DrawEffects,
-			Tint,
-			/*bAntialias*/ true,
-			LineThickness);
+		FSlateBrush Result;
+		FLinearColor BaseTint;
+
+		if (!IsUnsetBrush(NormalBrush))
+		{
+			Result = NormalBrush;
+			BaseTint = NormalBrush.TintColor.GetSpecifiedColor();
+		}
+		else
+		{
+			Result.DrawAs = ESlateBrushDrawType::Image;
+			Result.SetResourceObject(FScrollArrowDefaultTextures::Get().GetTexture(Direction));
+			BaseTint = StateBrush.TintColor.GetSpecifiedColor() * BuiltInArrowBaseTint;
+		}
+
+		Result.TintColor = FSlateColor(BaseTint * StateTint);
+		return Result;
 	}
-
-	return LayerId;
 }
-
-// ---------------------------------------------------------------------------------------------
-// SScrollArrowBar
-// ---------------------------------------------------------------------------------------------
 
 void SScrollArrowBar::Construct(const FArguments& InArgs)
 {
@@ -122,7 +70,7 @@ void SScrollArrowBar::Construct(const FArguments& InArgs)
 	OnScroll = InArgs._OnScroll;
 	UserScrollbarVisibility = InArgs._ScrollbarVisibility;
 
-	const FScrollBarStyle* BarStyle = InArgs._ScrollBarStyle
+	BarStyle = InArgs._ScrollBarStyle
 		? InArgs._ScrollBarStyle
 		: &FCoreStyle::Get().GetWidgetStyle<FScrollBarStyle>("Scrollbar");
 
@@ -133,98 +81,101 @@ void SScrollArrowBar::Construct(const FArguments& InArgs)
 	const TSharedRef<SWidget> StartWidget = MakeArrowButton(/*bIsEnd*/ false);
 	const TSharedRef<SWidget> EndWidget = MakeArrowButton(/*bIsEnd*/ true);
 
-	// Hidden (not Collapsed) keeps the slot, so the arrows stay pinned to the ends of the bar.
-	const TSharedRef<SWidget> TrackWidget =
+	// The track slot is pinned to exactly the style thickness. Hidden (not Collapsed) keeps the slot,
+	// so the arrows stay at the ends and the bar never changes width when the thumb appears.
+	const TSharedRef<SBox> TrackBox =
 		SNew(SBox)
 		.Visibility(this, &SScrollArrowBar::GetTrackVisibility)
 		[
 			ScrollBar.ToSharedRef()
 		];
 
+	TSharedPtr<SWidget> Layout;
 	if (Orientation == Orient_Vertical)
 	{
-		ChildSlot
-		[
+		TrackBox->SetWidthOverride(MakeAttributeSP(this, &SScrollArrowBar::GetBarThickness));
+		Layout =
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()[ StartWidget ]
-			+ SVerticalBox::Slot().FillHeight(1.0f)[ TrackWidget ]
-			+ SVerticalBox::Slot().AutoHeight()[ EndWidget ]
-		];
+			+ SVerticalBox::Slot().FillHeight(1.0f)[ TrackBox ]
+			+ SVerticalBox::Slot().AutoHeight()[ EndWidget ];
 	}
 	else
 	{
-		ChildSlot
-		[
+		TrackBox->SetHeightOverride(MakeAttributeSP(this, &SScrollArrowBar::GetBarThickness));
+		Layout =
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth()[ StartWidget ]
-			+ SHorizontalBox::Slot().FillWidth(1.0f)[ TrackWidget ]
-			+ SHorizontalBox::Slot().AutoWidth()[ EndWidget ]
-		];
+			+ SHorizontalBox::Slot().FillWidth(1.0f)[ TrackBox ]
+			+ SHorizontalBox::Slot().AutoWidth()[ EndWidget ];
 	}
+
+	// Background for the whole bar (only drawn if the user picked a brush).
+	ChildSlot
+	[
+		SAssignNew(BackgroundBorder, SBorder)
+		.BorderImage(&Settings.SideBarBackground)
+		.Padding(0.0f)
+		[
+			Layout.ToSharedRef()
+		]
+	];
 
 	SetVisibility(MakeAttributeSP(this, &SScrollArrowBar::GetBarVisibility));
 
 	ApplyStyles();
 }
 
-TSharedRef<SWidget> SScrollArrowBar::MakeArrowButton(bool bIsEnd)
+EScrollArrowDirection SScrollArrowBar::GetDirection(bool bIsEnd) const
 {
 	const bool bVertical = (Orientation == Orient_Vertical);
-	const EScrollArrowDirection Direction = bIsEnd
-		? (bVertical ? EScrollArrowDirection::Down : EScrollArrowDirection::Right)
-		: (bVertical ? EScrollArrowDirection::Up : EScrollArrowDirection::Left);
+	if (bIsEnd)
+	{
+		return bVertical ? EScrollArrowDirection::Down : EScrollArrowDirection::Right;
+	}
+	return bVertical ? EScrollArrowDirection::Up : EScrollArrowDirection::Left;
+}
 
-	TSharedPtr<SScrollArrowGlyph>& Glyph = bIsEnd ? EndGlyph : StartGlyph;
+TSharedRef<SWidget> SScrollArrowBar::MakeArrowButton(bool bIsEnd)
+{
 	TSharedPtr<SButton>& Button = bIsEnd ? EndButton : StartButton;
-	TSharedPtr<SBox>& SizeBox = bIsEnd ? EndSizeBox : StartSizeBox;
 	FButtonStyle& SlateStyle = bIsEnd ? EndSlateStyle : StartSlateStyle;
-
-	SAssignNew(Glyph, SScrollArrowGlyph).Direction(Direction);
 
 	if (bIsEnd)
 	{
 		SAssignNew(Button, SButton)
 			.ButtonStyle(&SlateStyle)
 			.ContentPadding(FMargin(0.0f))
-			.HAlign(HAlign_Center)
-			.VAlign(VAlign_Center)
 			.IsFocusable(false) // never steal keyboard / gamepad focus from the list
 			.IsEnabled(this, &SScrollArrowBar::IsEndEnabled)
-			.ForegroundColor(this, &SScrollArrowBar::GetEndForeground)
 			.OnPressed(this, &SScrollArrowBar::HandleEndPressed)
-			.OnReleased(this, &SScrollArrowBar::HandleEndReleased)
-			[
-				Glyph.ToSharedRef()
-			];
+			.OnReleased(this, &SScrollArrowBar::HandleEndReleased);
 	}
 	else
 	{
 		SAssignNew(Button, SButton)
 			.ButtonStyle(&SlateStyle)
 			.ContentPadding(FMargin(0.0f))
-			.HAlign(HAlign_Center)
-			.VAlign(VAlign_Center)
 			.IsFocusable(false)
 			.IsEnabled(this, &SScrollArrowBar::IsStartEnabled)
-			.ForegroundColor(this, &SScrollArrowBar::GetStartForeground)
 			.OnPressed(this, &SScrollArrowBar::HandleStartPressed)
-			.OnReleased(this, &SScrollArrowBar::HandleStartReleased)
-			[
-				Glyph.ToSharedRef()
-			];
+			.OnReleased(this, &SScrollArrowBar::HandleStartReleased);
 	}
 
-	SAssignNew(SizeBox, SBox)
-	[
-		Button.ToSharedRef()
-	];
-
-	return SizeBox.ToSharedRef();
+	// Square button, sized by the scroll bar style thickness.
+	const TSharedRef<SBox> SizeBox =
+		SNew(SBox)
+		[
+			Button.ToSharedRef()
+		];
+	SizeBox->SetWidthOverride(MakeAttributeSP(this, &SScrollArrowBar::GetBarThickness));
+	SizeBox->SetHeightOverride(MakeAttributeSP(this, &SScrollArrowBar::GetBarThickness));
+	return SizeBox;
 }
 
 void SScrollArrowBar::SetSettings(const FScrollArrowBarSettings& InSettings)
 {
-	Settings = InSettings;
+	Settings = InSettings; // keeps the address the background border points at
 	ApplyStyles();
 	ScrollBar->InvalidateStyle();
 	Invalidate(EInvalidateWidgetReason::Layout);
@@ -232,33 +183,34 @@ void SScrollArrowBar::SetSettings(const FScrollArrowBarSettings& InSettings)
 
 void SScrollArrowBar::ApplyStyles()
 {
-	ConfigureButton(StartButton, StartSizeBox, StartGlyph, StartSlateStyle, Settings.StartButtonStyle);
-	ConfigureButton(EndButton, EndSizeBox, EndGlyph, EndSlateStyle, Settings.EndButtonStyle);
+	ConfigureButton(StartButton, StartSlateStyle, Settings.StartButtonStyle, GetDirection(false));
+	ConfigureButton(EndButton, EndSlateStyle, Settings.EndButtonStyle, GetDirection(true));
 }
 
-void SScrollArrowBar::ConfigureButton(const TSharedPtr<SButton>& Button, const TSharedPtr<SBox>& SizeBox,
-	const TSharedPtr<SScrollArrowGlyph>& Glyph, FButtonStyle& SlateStyle, const FScrollArrowButtonStyle& Style) const
+void SScrollArrowBar::ConfigureButton(const TSharedPtr<SButton>& Button, FButtonStyle& SlateStyle,
+	const FScrollArrowButtonStyle& Style, EScrollArrowDirection Direction) const
 {
+	const FSlateBrush& Normal = Style.NormalImage;
+
 	SlateStyle
-		.SetNormal(Style.NormalImage)
-		.SetHovered(Style.HoveredImage)
-		.SetPressed(Style.PressedImage)
-		.SetDisabled(Style.DisabledImage)
+		.SetNormal(ResolveBrush(Style.NormalImage, Normal, Direction, NormalStateTint))
+		.SetHovered(ResolveBrush(Style.HoveredImage, Normal, Direction, HoveredStateTint))
+		.SetPressed(ResolveBrush(Style.PressedImage, Normal, Direction, PressedStateTint))
+		.SetDisabled(ResolveBrush(Style.DisabledImage, Normal, Direction, DisabledStateTint))
 		.SetNormalPadding(FMargin(0.0f))
 		.SetPressedPadding(FMargin(0.0f));
 
 	Button->SetButtonStyle(&SlateStyle);
-
-	const bool bVertical = (Orientation == Orient_Vertical);
-	SizeBox->SetWidthOverride(FOptionalSize(bVertical ? Style.ButtonThickness : Style.ButtonLength));
-	SizeBox->SetHeightOverride(FOptionalSize(bVertical ? Style.ButtonLength : Style.ButtonThickness));
-
-	Glyph->SetStyle(Style);
 }
 
 // ---------------------------------------------------------------------------------------------
 // Visibility / enabled state
 // ---------------------------------------------------------------------------------------------
+
+FOptionalSize SScrollArrowBar::GetBarThickness() const
+{
+	return FOptionalSize(BarStyle ? BarStyle->Thickness : 16.0f);
+}
 
 EVisibility SScrollArrowBar::GetBarVisibility() const
 {
@@ -303,26 +255,6 @@ bool SScrollArrowBar::IsArrowEnabled(bool bIsEnd) const
 	}
 
 	return Settings.bDisableArrowsAtLimits ? CanScrollInDirection(bIsEnd) : true;
-}
-
-FSlateColor SScrollArrowBar::GetArrowForeground(bool bIsEnd) const
-{
-	const FScrollArrowButtonStyle& Style = bIsEnd ? Settings.EndButtonStyle : Settings.StartButtonStyle;
-	const TSharedPtr<SButton>& Button = bIsEnd ? EndButton : StartButton;
-
-	if (!Button.IsValid() || !Button->IsEnabled())
-	{
-		return FSlateColor(Style.ArrowDisabledTint);
-	}
-	if (Button->IsPressed())
-	{
-		return FSlateColor(Style.ArrowPressedTint);
-	}
-	if (Button->IsHovered())
-	{
-		return FSlateColor(Style.ArrowHoveredTint);
-	}
-	return FSlateColor(Style.ArrowNormalTint);
 }
 
 // ---------------------------------------------------------------------------------------------
