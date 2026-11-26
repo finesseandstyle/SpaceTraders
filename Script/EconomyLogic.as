@@ -134,8 +134,6 @@ struct FMarketGoodStatus
     UPROPERTY() float Equilibrium = 1000.0;
     UPROPERTY() float Supply = 1000.0;
     UPROPERTY() float CirculatingQuantity = 0.0;
-    UPROPERTY() float BuyPricePoint = 0.0;
-    UPROPERTY() float SellPricePoint = 0.0;
     UPROPERTY() float BuyPrice = 0.0;
     UPROPERTY() float SellPrice = 0.0;
     UPROPERTY() float LastBuySupply = 1000.0;
@@ -145,6 +143,25 @@ struct FMarketGoodStatus
     UPROPERTY() TArray<FTradeModifier> BuyModifiers;
     UPROPERTY() TArray<FTradeModifier> SellModifiers;
     UPROPERTY() TMap<FName, float> OriginModifiers;
+
+    FMarketGoodStatus() {}
+
+    FMarketGoodStatus(ETradeGoodType TradeGood, ERaceType PrimaryRace, EPoliticalSystem PoliticalSystem, 
+        float InEquilibrium, float InSupply)
+    {
+        bIsEssential = EconomyLogic::IsEssential(TradeGood, PrimaryRace);
+        bIsLegal = EconomyLogic::IsLegal(TradeGood, PrimaryRace, PoliticalSystem);
+
+        Equilibrium = InEquilibrium;
+        Supply = InSupply;
+        CirculatingQuantity = 0;
+        LastBuySupply = Supply;
+        LastSellSupply = Supply;
+
+        // Guard against division by zero if Equilibrium is 0
+        SupplyRatio = (Equilibrium > 0.0) ? (Supply / Equilibrium) : 1.0;
+        Situation = EconomyLogic::GetSituation(SupplyRatio);
+    }
 };
 
 struct FTradeGoodStack
@@ -152,7 +169,7 @@ struct FTradeGoodStack
     UPROPERTY() int32 Quantity = 0;
     UPROPERTY() FText Origin;
     UPROPERTY() FText Producer;
-    UPROPERTY() int32 PurchasedPrice = 0;
+    UPROPERTY() int32 TotalValue = 0;
 };
 
 struct FProducer
@@ -172,6 +189,16 @@ struct FMarket
     UPROPERTY() float PopulationMillions = 0.0;
     UPROPERTY() TArray<FMarketGoodStatus> MarketGoods;
     UPROPERTY() TArray<int32> ProducerIndexes; // We create a global list of producers and then assign to markets the indexes
+
+    FMarket(FName InName, ERaceType InRace, EEconomyType InEconomyType, EPoliticalSystem InPoliticalSystem, float InPopulationMillions, TArray<FMarketGoodStatus> InMarketGoods)
+    {
+        Name = InName;
+        Race = InRace;
+        EconomyType = InEconomyType;
+        PoliticalSystem = InPoliticalSystem;
+        PopulationMillions = InPopulationMillions;
+        MarketGoods = InMarketGoods;
+    }
 };
 
 // How many producers spawn for a trade good (was a DT_ProducerSpawnRules row).

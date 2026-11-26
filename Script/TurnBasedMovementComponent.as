@@ -394,6 +394,13 @@ class UTurnBasedMovementComponent : UActorComponent
     }
 
     UFUNCTION(BlueprintPure)
+    float GetEvalSpeed()
+    {
+        float Speed = UPathingUtils::EvalCurveDerivative(MovementCurve, TRS.NormalizedTurnProgress) * SegmentLength;
+        return MovementCurve != nullptr ? Speed : 0.0;
+    }
+
+    UFUNCTION(BlueprintPure)
     FVector GetVelocity()
     {
         return FVector(GetInstantSpeed()) * GetOwner().ActorForwardVector;

@@ -18,7 +18,8 @@ public class SpaceTraders : ModuleRules
 			"BetterHomingProjectiles",
 			"SixDOFMovement",
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"UMG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

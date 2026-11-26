@@ -1220,17 +1220,12 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
     UFUNCTION()
     void InitMarket(FName MarketName, ERaceType PrimaryRace, EEconomyType EconomyType, EPoliticalSystem PoliticalSystem, float Population)
     {
-        FMarket MarketData;
-        MarketData.Name = MarketName;
-        MarketData.Race = PrimaryRace;
-        MarketData.EconomyType = EconomyType;
-        MarketData.PoliticalSystem = PoliticalSystem;
-        MarketData.PopulationMillions = Population;
+        TArray<FMarketGoodStatus> MarketGoods;
 
         for (int i = 0; i < EconomyLogic::TradeGoodCount; i++)
         {
             ETradeGoodType TradeGood = ETradeGoodType(i);
-            FMarketGoodStatus GoodStatus;
+            
 
             FTradeGoodRules GoodRules = EconomyLogic::GetTradeGoodRules(TradeGood);
             FProducerSpawnRules SpawnRules = EconomyLogic::GetProducerSpawnRules(TradeGood);
@@ -1251,20 +1246,14 @@ class UTurnResolutionSubsystem : UScriptWorldSubsystem
             float ProducerBoost = Math::Clamp(Math::Sqrt(Math::Max(BonusAmount / (float(SpawnRules.BaseAmount) + 1), 1)), 0, 1);
             float Supply = Math::RoundToFloat(Equilibrium * SupplySpread * ProducerBoost);
 
-            GoodStatus.bIsEssential = EconomyLogic::IsEssential(TradeGood, PrimaryRace);
-            GoodStatus.bIsLegal = EconomyLogic::IsLegal(TradeGood, PrimaryRace, PoliticalSystem);
-            GoodStatus.Equilibrium = Equilibrium;
-            GoodStatus.Supply = Supply;
-            GoodStatus.LastBuySupply = Supply;
-            GoodStatus.LastSellSupply = Supply;
-            GoodStatus.SupplyRatio = Supply / Equilibrium;
-            GoodStatus.Situation = EconomyLogic::GetSituation(GoodStatus.SupplyRatio);
+
+            FMarketGoodStatus GoodStatus = FMarketGoodStatus(TradeGood, PrimaryRace, PoliticalSystem, Equilibrium, Supply);
             GoodStatus.BuyPrice = CalculateBuyFinalPrice(TradeGood, GoodStatus);
             GoodStatus.SellPrice = CalculateSellFinalPrice(TradeGood, GoodStatus, MarketName);
 
             // TODO: Complete remaining clipped right-edge nodes (situation/bracketed quantity/price fields)
-            MarketData.MarketGoods.Add(GoodStatus);
+            MarketGoods.Add(GoodStatus);
         }
-        GlobalMarkets.Add(MarketData);
+        GlobalMarkets.Add(FMarket(MarketName, PrimaryRace, EconomyType, PoliticalSystem, Population, MarketGoods));
     }
 }
