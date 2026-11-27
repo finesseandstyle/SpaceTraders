@@ -36,6 +36,7 @@ FScrollArrowBarSettings UScrollArrowListView::MakeSlateSettings() const
 	FScrollArrowBarSettings Settings;
 	Settings.bAlwaysShowScrollBar = bAlwaysShowScrollBar;
 	Settings.bDisableArrowsAtLimits = bDisableArrowsAtScrollLimits;
+	Settings.bIgnoreScrollAnimationWhileDragging = bIgnoreScrollAnimationWhenDragging;
 	Settings.ClickScrollAmount = ClickScrollAmount;
 	Settings.HoldRepeatDelay = HoldRepeatDelay;
 	Settings.HoldScrollSpeed = HoldScrollSpeed;

@@ -40,6 +40,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Scroll Arrows")
 	bool bAlwaysShowScrollBar = false;
 
+	/**
+	 * When "Enable Scroll Animation" is on, dragging the scroll bar thumb normally lags behind the
+	 * mouse because the list interpolates towards the new position. With this on, dragging jumps
+	 * straight to the dragged position; arrow buttons, mouse wheel etc. still animate.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Scroll Arrows")
+	bool bIgnoreScrollAnimationWhenDragging = true;
+
 	/** Grey out an arrow button once its end of the list has been reached. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Scroll Arrows")
 	bool bDisableArrowsAtScrollLimits = true;

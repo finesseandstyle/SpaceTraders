@@ -16,7 +16,9 @@
  *     lighter / darker per state. Assigning only a Normal texture is therefore enough.
  *   - Any state you set yourself is always used as-is.
  *
- * The button is square; its size is the list's Scroll Bar Style "Thickness".
+ * Size: across the scroll axis the button is always the list's Scroll Bar Style "Thickness" (so it
+ * lines up with the scroll bar). Along the scroll axis it is ButtonLength. The built-in arrow is
+ * scaled down to the smaller of the two sides.
  */
 USTRUCT(BlueprintType)
 struct FScrollArrowButtonStyle
@@ -38,4 +40,11 @@ struct FScrollArrowButtonStyle
 	/** Arrow button when it cannot scroll any further (or there is nothing to scroll). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Button Images")
 	FSlateBrush DisabledImage;
+
+	/**
+	 * Size of the button along the scroll axis: its height in a vertical list, its width in a
+	 * horizontal one. (The other side is the Scroll Bar Style "Thickness".)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Button Size", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float ButtonLength = 16.0f;
 };

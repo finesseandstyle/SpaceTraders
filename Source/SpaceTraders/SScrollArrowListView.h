@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Widgets/Layout/SScrollBar.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Views/SListView.h"
 #include "SScrollArrowBar.h"
@@ -32,6 +33,11 @@ public:
 		ListArgs._ExternalScrollbar = ArrowBar->GetScrollBar();
 		SListView<ItemType>::Construct(ListArgs);
 
+		// The list just bound its own handler to the scroll bar. Re-bind through ours so that we can
+		// skip the scroll animation while the thumb is dragged.
+		ArrowBar->GetScrollBar()->SetOnUserScrolled(
+			FOnUserScrolled::CreateSP(this, &SScrollArrowListView::HandleScrollBarDragged));
+
 		// With an external scroll bar the list only contains the item panel. Put the bar next to it.
 		const TSharedRef<SWidget> ListContent = this->ChildSlot.GetWidget();
 
@@ -57,6 +63,8 @@ public:
 
 	void SetArrowSettings(const FScrollArrowBarSettings& InSettings)
 	{
+		bIgnoreAnimationWhileDragging = InSettings.bIgnoreScrollAnimationWhileDragging;
+
 		if (ArrowBar.IsValid())
 		{
 			ArrowBar->SetSettings(InSettings);
@@ -64,6 +72,20 @@ public:
 	}
 
 private:
+	/** User dragged the scroll bar thumb. */
+	void HandleScrollBarDragged(float InScrollOffsetFraction)
+	{
+		// Regular list behaviour: sets the desired scroll offset.
+		this->ScrollBar_OnUserScrolled(InScrollOffsetFraction);
+
+		if (bIgnoreAnimationWhileDragging && this->bEnableAnimatedScrolling)
+		{
+			// Skip the interpolation: show the dragged position right away, so the list stays glued to the thumb.
+			this->CurrentScrollOffset = this->GetTargetScrollOffset();
+			this->RequestLayoutRefresh();
+		}
+	}
+
 	/** Offsets are in items, same unit as SetScrollOffset / GetScrollOffset. The list clamps the far end. */
 	void HandleArrowScroll(float DeltaInItems)
 	{
@@ -72,4 +94,5 @@ private:
 	}
 
 	TSharedPtr<SScrollArrowBar> ArrowBar;
+	bool bIgnoreAnimationWhileDragging = true;
 };

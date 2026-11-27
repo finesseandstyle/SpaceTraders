@@ -40,6 +40,13 @@ struct FScrollArrowBarSettings
 	/** Items per second scrolled while the button is held past the repeat delay. */
 	float HoldScrollSpeed = 12.0f;
 
+	/**
+	 * While the scroll bar thumb is being dragged, jump straight to the dragged position instead of
+	 * interpolating (only matters when the list has "Enable Scroll Animation" on).
+	 * Consumed by SScrollArrowListView, not by the bar itself.
+	 */
+	bool bIgnoreScrollAnimationWhileDragging = true;
+
 	/** Drawn behind the whole sidebar (arrows + scroll bar) whenever the sidebar is visible. */
 	FSlateBrush SideBarBackground;
 
@@ -58,7 +65,8 @@ DECLARE_DELEGATE_OneParam(FOnScrollArrowScroll, float /*DeltaInItems*/);
  * when horizontal), on top of an optional background brush and inside an optional padding.
  *
  * The bar is exactly "Scroll Bar Style -> Thickness" wide (tall when horizontal): the arrows, the
- * track and the background all share that size, so nothing shifts when the thumb appears.
+ * track and the background all share that size, so nothing shifts when the thumb appears. The
+ * arrows' length along the scroll axis is set per button style (ButtonLength).
  *
  * The inner SScrollBar is handed to the list view as its ExternalScrollbar, so the list drives the
  * thumb and handles dragging exactly like the stock scroll bar does.
@@ -99,6 +107,10 @@ private:
 	bool IsStartEnabled() const { return IsArrowEnabled(false); }
 	bool IsEndEnabled() const { return IsArrowEnabled(true); }
 
+	FOptionalSize GetGlyphSize(bool bIsEnd) const;
+	FOptionalSize GetStartGlyphSize() const { return GetGlyphSize(false); }
+	FOptionalSize GetEndGlyphSize() const { return GetGlyphSize(true); }
+
 	FSlateColor GetArrowTint(bool bIsEnd) const;
 	FSlateColor GetStartArrowTint() const { return GetArrowTint(false); }
 	FSlateColor GetEndArrowTint() const { return GetArrowTint(true); }
@@ -118,8 +130,8 @@ private:
 	EScrollArrowDirection GetDirection(bool bIsEnd) const;
 	TSharedRef<SWidget> MakeArrowButton(bool bIsEnd);
 	void ApplyStyles();
-	void ConfigureButton(const TSharedPtr<SButton>& Button, const TSharedPtr<SImage>& Glyph, FButtonStyle& SlateStyle,
-		FSlateBrush& ArrowBrush, const FScrollArrowButtonStyle& Style, EScrollArrowDirection Direction) const;
+	void ConfigureButton(const TSharedPtr<SButton>& Button, const TSharedPtr<SBox>& SizeBox, const TSharedPtr<SImage>& Glyph,
+		FButtonStyle& SlateStyle, FSlateBrush& ArrowBrush, const FScrollArrowButtonStyle& Style, EScrollArrowDirection Direction) const;
 
 private:
 	EOrientation Orientation = Orient_Vertical;
@@ -133,6 +145,8 @@ private:
 
 	TSharedPtr<SButton> StartButton;
 	TSharedPtr<SButton> EndButton;
+	TSharedPtr<SBox> StartSizeBox;
+	TSharedPtr<SBox> EndSizeBox;
 
 	// Built-in arrow shown on top of the button square (only when no custom textures are used).
 	TSharedPtr<SImage> StartGlyph;

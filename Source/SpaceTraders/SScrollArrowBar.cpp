@@ -148,10 +148,11 @@ TSharedRef<SWidget> SScrollArrowBar::MakeArrowButton(bool bIsEnd)
 {
 	TSharedPtr<SButton>& Button = bIsEnd ? EndButton : StartButton;
 	TSharedPtr<SImage>& Glyph = bIsEnd ? EndGlyph : StartGlyph;
+	TSharedPtr<SBox>& SizeBox = bIsEnd ? EndSizeBox : StartSizeBox;
 	FButtonStyle& SlateStyle = bIsEnd ? EndSlateStyle : StartSlateStyle;
 	FSlateBrush& ArrowBrush = bIsEnd ? EndArrowBrush : StartArrowBrush;
 
-	// Built-in arrow, drawn on top of the button square. Hidden (NoDrawType) when custom textures are used.
+	// Built-in arrow, drawn on top of the button. Hidden (NoDrawType) when custom textures are used.
 	if (bIsEnd)
 	{
 		SAssignNew(Glyph, SImage)
@@ -167,17 +168,31 @@ TSharedRef<SWidget> SScrollArrowBar::MakeArrowButton(bool bIsEnd)
 			.Visibility(EVisibility::HitTestInvisible);
 	}
 
+	// The arrow is a square scaled down to the smaller side of the button, centred in it.
+	const TSharedRef<SBox> GlyphBox =
+		SNew(SBox)
+		[
+			Glyph.ToSharedRef()
+		];
+	const TAttribute<FOptionalSize> GlyphSize = bIsEnd
+		? MakeAttributeSP(this, &SScrollArrowBar::GetEndGlyphSize)
+		: MakeAttributeSP(this, &SScrollArrowBar::GetStartGlyphSize);
+	GlyphBox->SetWidthOverride(GlyphSize);
+	GlyphBox->SetHeightOverride(GlyphSize);
+
 	if (bIsEnd)
 	{
 		SAssignNew(Button, SButton)
 			.ButtonStyle(&SlateStyle)
 			.ContentPadding(FMargin(0.0f))
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
 			.IsFocusable(false) // never steal keyboard / gamepad focus from the list
 			.IsEnabled(this, &SScrollArrowBar::IsEndEnabled)
 			.OnPressed(this, &SScrollArrowBar::HandleEndPressed)
 			.OnReleased(this, &SScrollArrowBar::HandleEndReleased)
 			[
-				Glyph.ToSharedRef()
+				GlyphBox
 			];
 	}
 	else
@@ -185,24 +200,32 @@ TSharedRef<SWidget> SScrollArrowBar::MakeArrowButton(bool bIsEnd)
 		SAssignNew(Button, SButton)
 			.ButtonStyle(&SlateStyle)
 			.ContentPadding(FMargin(0.0f))
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
 			.IsFocusable(false)
 			.IsEnabled(this, &SScrollArrowBar::IsStartEnabled)
 			.OnPressed(this, &SScrollArrowBar::HandleStartPressed)
 			.OnReleased(this, &SScrollArrowBar::HandleStartReleased)
 			[
-				Glyph.ToSharedRef()
+				GlyphBox
 			];
 	}
 
-	// Square button, sized by the scroll bar style thickness.
-	const TSharedRef<SBox> SizeBox =
-		SNew(SBox)
-		[
-			Button.ToSharedRef()
-		];
-	SizeBox->SetWidthOverride(MakeAttributeSP(this, &SScrollArrowBar::GetBarThickness));
-	SizeBox->SetHeightOverride(MakeAttributeSP(this, &SScrollArrowBar::GetBarThickness));
-	return SizeBox;
+	// Across the scroll axis the button follows the scroll bar thickness; the length along the
+	// axis is applied from the button style in ConfigureButton().
+	SAssignNew(SizeBox, SBox)
+	[
+		Button.ToSharedRef()
+	];
+	if (Orientation == Orient_Vertical)
+	{
+		SizeBox->SetWidthOverride(MakeAttributeSP(this, &SScrollArrowBar::GetBarThickness));
+	}
+	else
+	{
+		SizeBox->SetHeightOverride(MakeAttributeSP(this, &SScrollArrowBar::GetBarThickness));
+	}
+	return SizeBox.ToSharedRef();
 }
 
 void SScrollArrowBar::SetSettings(const FScrollArrowBarSettings& InSettings)
@@ -217,8 +240,8 @@ void SScrollArrowBar::ApplyStyles()
 {
 	ChildSlot.SetPadding(Settings.SideBarPadding);
 
-	ConfigureButton(StartButton, StartGlyph, StartSlateStyle, StartArrowBrush, Settings.StartButtonStyle, GetDirection(false));
-	ConfigureButton(EndButton, EndGlyph, EndSlateStyle, EndArrowBrush, Settings.EndButtonStyle, GetDirection(true));
+	ConfigureButton(StartButton, StartSizeBox, StartGlyph, StartSlateStyle, StartArrowBrush, Settings.StartButtonStyle, GetDirection(false));
+	ConfigureButton(EndButton, EndSizeBox, EndGlyph, EndSlateStyle, EndArrowBrush, Settings.EndButtonStyle, GetDirection(true));
 
 	if (BackgroundBorder.IsValid())
 	{
@@ -226,9 +249,20 @@ void SScrollArrowBar::ApplyStyles()
 	}
 }
 
-void SScrollArrowBar::ConfigureButton(const TSharedPtr<SButton>& Button, const TSharedPtr<SImage>& Glyph, FButtonStyle& SlateStyle,
-	FSlateBrush& ArrowBrush, const FScrollArrowButtonStyle& Style, EScrollArrowDirection Direction) const
+void SScrollArrowBar::ConfigureButton(const TSharedPtr<SButton>& Button, const TSharedPtr<SBox>& SizeBox, const TSharedPtr<SImage>& Glyph,
+	FButtonStyle& SlateStyle, FSlateBrush& ArrowBrush, const FScrollArrowButtonStyle& Style, EScrollArrowDirection Direction) const
 {
+	// Length along the scroll axis: height in a vertical list, width in a horizontal one.
+	const FOptionalSize Length(FMath::Max(1.0f, Style.ButtonLength));
+	if (Orientation == Orient_Vertical)
+	{
+		SizeBox->SetHeightOverride(Length);
+	}
+	else
+	{
+		SizeBox->SetWidthOverride(Length);
+	}
+
 	const FSlateBrush& Normal = Style.NormalImage;
 
 	SlateStyle
@@ -262,6 +296,13 @@ void SScrollArrowBar::ConfigureButton(const TSharedPtr<SButton>& Button, const T
 FOptionalSize SScrollArrowBar::GetBarThickness() const
 {
 	return FOptionalSize(BarStyle ? BarStyle->Thickness : 16.0f);
+}
+
+FOptionalSize SScrollArrowBar::GetGlyphSize(bool bIsEnd) const
+{
+	const float Thickness = BarStyle ? BarStyle->Thickness : 16.0f;
+	const float Length = (bIsEnd ? Settings.EndButtonStyle : Settings.StartButtonStyle).ButtonLength;
+	return FOptionalSize(FMath::Max(1.0f, FMath::Min(Thickness, Length)));
 }
 
 FSlateColor SScrollArrowBar::GetArrowTint(bool bIsEnd) const
