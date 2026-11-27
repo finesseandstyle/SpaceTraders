@@ -15,12 +15,13 @@
  *    the end of the list is reached.
  *  - Arrow buttons are styled with per-state brushes, like the scroll bar handle (built-in arrow
  *    textures are used for anything left empty).
- *  - The side bar (arrows + track) can have its own background brush.
+ *  - The sidebar (= scroll bar + the two arrow buttons) can have its own background brush and
+ *    its own padding.
  *  - "Always Show Scroll Bar": keeps the arrows on screen (greyed out, track hidden) when there is
  *    not enough content to scroll.
  *
  * The scroll bar itself (thumb / track) still uses the list's regular "Scroll Bar Style", and that
- * style's Thickness is also the size of the arrow buttons and of the whole side bar.
+ * style's Thickness is also the size of the arrow buttons and of the whole sidebar.
  */
 UCLASS(meta = (DisplayName = "Scroll Arrow List View", EntryInterface = "/Script/UMG.UserObjectListEntry"))
 class SPACETRADERS_API UScrollArrowListView : public UListView
@@ -58,12 +59,20 @@ public:
 	// ---- Style ---------------------------------------------------------------------------
 
 	/**
-	 * Background drawn behind the whole side bar (arrow buttons + track). Unlike the list's own
+	 * Background drawn behind the whole sidebar (arrow buttons + scroll bar). Unlike the list's own
 	 * background it only exists while the side bar is on screen. Set "Draw As" to something other
 	 * than None to enable it.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Scroll Arrows|Style")
 	FSlateBrush SideBarBackground;
+
+	/**
+	 * Spacing around the whole sidebar, outside its background. Use it to keep list entries away
+	 * from the sidebar. Removed together with the sidebar when the sidebar is not shown.
+	 * (The list's own "Scroll Bar Padding" still pads the scroll bar inside the sidebar.)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Scroll Arrows|Style")
+	FMargin SideBarPadding;
 
 	/**
 	 * Use the start button style (up / left) for the end button (down / right) too.
@@ -91,6 +100,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Scroll Arrows")
 	void SetSideBarBackground(const FSlateBrush& InBrush);
+
+	UFUNCTION(BlueprintCallable, Category = "Scroll Arrows")
+	void SetSideBarPadding(const FMargin& InPadding);
 
 	UFUNCTION(BlueprintCallable, Category = "Scroll Arrows")
 	void SetStartButtonStyle(const FScrollArrowButtonStyle& InStyle);

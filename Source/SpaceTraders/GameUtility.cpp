@@ -14,6 +14,7 @@
 #include "GameFramework/Pawn.h"
 #include "Item.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Internationalization/Regex.h"
 
 //Implementation: https://forums.unrealengine.com/t/project-world-to-screen-location-stops-returning-a-value/57135/11
 //Credit to Branden Marais
@@ -706,4 +707,39 @@ bool UGameUtility::IsCursorOverUI()
 	FWidgetPath Path = FSlateApplication::Get().LocateWindowUnderMouse(FSlateApplication::Get().GetCursorPos(), FSlateApplication::Get().GetInteractiveTopLevelWindows(), true);
 	TSharedPtr vp = FSlateApplication::Get().GetGameViewport();
 	return !(Path.IsValid() && (Path.GetLastWidget() == vp.ToSharedRef())); // returns false if it doesn't find anything
+}
+
+FText UGameUtility::FormatSequentialNamedText(const FText& Template, const TArray<FText>& Values)
+{
+	// If we have no values to inject, return the original template to avoid errors.
+	if (Values.Num() == 0)
+	{
+		return Template;
+	}
+
+	FString SourceString = Template.ToString();
+	
+	// Pattern explanation: \{ matches literal opening brace, ([^}]+) captures content that isn't a closing brace, \} matches literal closing brace
+	//Therefore, avoid using literal { } in text.
+	const FRegexPattern Pattern(TEXT("\\{([^}]+)\\}"));
+	FRegexMatcher Matcher(Pattern, SourceString);
+	
+	FFormatNamedArguments Args;
+	int32 ValueIndex = 0;
+
+	while (Matcher.FindNext())
+	{
+		if (!Values.IsValidIndex(ValueIndex))
+		{
+			break;
+		}
+		// (the text inside the brackets, e.g., "MinDamage")
+		FString KeyName = Matcher.GetCaptureGroup(1);
+
+		Args.Add(KeyName, Values[ValueIndex]);
+		ValueIndex++;
+	}
+
+	// Format the text using the Map we constructed
+	return FText::Format(Template, Args);
 }

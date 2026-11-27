@@ -40,6 +40,7 @@ FScrollArrowBarSettings UScrollArrowListView::MakeSlateSettings() const
 	Settings.HoldRepeatDelay = HoldRepeatDelay;
 	Settings.HoldScrollSpeed = HoldScrollSpeed;
 	Settings.SideBarBackground = SideBarBackground;
+	Settings.SideBarPadding = SideBarPadding;
 	Settings.StartButtonStyle = StartButtonStyle;
 	Settings.EndButtonStyle = bUseSameStyleForBothButtons ? StartButtonStyle : EndButtonStyle;
 	return Settings;
@@ -62,6 +63,12 @@ void UScrollArrowListView::SetAlwaysShowScrollBar(bool bInAlwaysShowScrollBar)
 void UScrollArrowListView::SetSideBarBackground(const FSlateBrush& InBrush)
 {
 	SideBarBackground = InBrush;
+	ApplyArrowSettings();
+}
+
+void UScrollArrowListView::SetSideBarPadding(const FMargin& InPadding)
+{
+	SideBarPadding = InPadding;
 	ApplyArrowSettings();
 }
 

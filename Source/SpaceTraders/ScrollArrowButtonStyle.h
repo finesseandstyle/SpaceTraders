@@ -9,10 +9,12 @@
  * Appearance of one scroll arrow button: one brush per interaction state, exactly like the
  * scroll bar handle (Normal / Hovered / Dragged).
  *
- * Every brush that is left at its default (Draw As = Image, no texture) falls back to:
- *   1. the Normal image, if that one has a texture (tinted darker / lighter per state), or
- *   2. a built-in arrow texture pointing in the right direction.
- * So the buttons look right out of the box, and assigning a texture to Normal alone is enough.
+ * Defaults, so the buttons look right out of the box:
+ *   - If Normal has no texture, the button is drawn as a solid square (which changes colour on
+ *     hover / press / disabled) with a built-in arrow on top. Hovering highlights the whole square.
+ *   - If Normal has a texture, that texture is used for every state you left empty, tinted
+ *     lighter / darker per state. Assigning only a Normal texture is therefore enough.
+ *   - Any state you set yourself is always used as-is.
  *
  * The button is square; its size is the list's Scroll Bar Style "Thickness".
  */

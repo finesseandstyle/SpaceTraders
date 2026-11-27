@@ -23,6 +23,7 @@ public:
 		SAssignNew(ArrowBar, SScrollArrowBar)
 			.Orientation(ListOrientation)
 			.ScrollBarStyle(InArgs._ScrollBarStyle)        // the list's own "Scroll Bar Style"
+			.ScrollBarPadding(InArgs._ScrollBarPadding)    // the list's own scroll bar padding
 			.ScrollbarVisibility(InArgs._ScrollbarVisibility)
 			.OnScroll(this, &SScrollArrowListView::HandleArrowScroll);
 

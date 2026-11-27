@@ -2,6 +2,7 @@
 #include "SScrollArrowBar.h"
 
 #include "Styling/CoreStyle.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -13,14 +14,24 @@ namespace
 	// Fractions of the scroll track; tight enough to be exact for lists with 100k+ items.
 	constexpr float LimitTolerance = 1.e-5f;
 
-	// Per-state tint multipliers used when a state has no image of its own.
-	const FLinearColor NormalStateTint(1.0f, 1.0f, 1.0f, 1.0f);
-	const FLinearColor HoveredStateTint(1.4f, 1.4f, 1.4f, 1.0f);
-	const FLinearColor PressedStateTint(0.7f, 0.7f, 0.7f, 1.0f);
-	const FLinearColor DisabledStateTint(0.45f, 0.45f, 0.45f, 0.5f);
+	// --- Default look (used while the user has not assigned a Normal texture) --------------------
+	// Solid square behind the arrow; this is what highlights as a whole on hover.
+	const FLinearColor DefaultNormalSquare(0.10f, 0.10f, 0.10f, 1.0f);
+	const FLinearColor DefaultHoveredSquare(0.22f, 0.22f, 0.22f, 1.0f);
+	const FLinearColor DefaultPressedSquare(0.36f, 0.36f, 0.36f, 1.0f);
+	const FLinearColor DefaultDisabledSquare(0.06f, 0.06f, 0.06f, 0.6f);
 
-	// The built-in arrow texture is pure white; this makes its idle colour a soft grey.
-	const FLinearColor BuiltInArrowBaseTint(0.7f, 0.7f, 0.7f, 1.0f);
+	// Tint of the built-in arrow on top of the square.
+	const FLinearColor DefaultNormalArrow(0.75f, 0.75f, 0.75f, 1.0f);
+	const FLinearColor DefaultHoveredArrow(1.0f, 1.0f, 1.0f, 1.0f);
+	const FLinearColor DefaultPressedArrow(0.55f, 0.55f, 0.55f, 1.0f);
+	const FLinearColor DefaultDisabledArrow(0.30f, 0.30f, 0.30f, 0.6f);
+
+	// --- Per-state multipliers when inheriting a user-supplied Normal texture ---------------------
+	const FLinearColor InheritNormalTint(1.0f, 1.0f, 1.0f, 1.0f);
+	const FLinearColor InheritHoveredTint(1.4f, 1.4f, 1.4f, 1.0f);
+	const FLinearColor InheritPressedTint(0.7f, 0.7f, 0.7f, 1.0f);
+	const FLinearColor InheritDisabledTint(0.45f, 0.45f, 0.45f, 0.5f);
 
 	/** A brush the user has not touched: "Draw As = Image" with no texture. */
 	bool IsUnsetBrush(const FSlateBrush& Brush)
@@ -31,13 +42,13 @@ namespace
 	}
 
 	/**
-	 * Picks what a state really draws:
+	 * What a state draws as the button background:
 	 *   - the user's brush if they set one,
-	 *   - else the Normal brush if it has a texture (tinted for this state),
-	 *   - else the built-in arrow for this button's direction.
+	 *   - else the user's Normal brush (tinted for this state) if that has a texture,
+	 *   - else a solid default square.
 	 */
-	FSlateBrush ResolveBrush(const FSlateBrush& StateBrush, const FSlateBrush& NormalBrush,
-		EScrollArrowDirection Direction, const FLinearColor& StateTint)
+	FSlateBrush ResolveBackground(const FSlateBrush& StateBrush, const FSlateBrush& NormalBrush,
+		const FLinearColor& DefaultSquareColor, const FLinearColor& InheritTint)
 	{
 		if (!IsUnsetBrush(StateBrush))
 		{
@@ -45,21 +56,17 @@ namespace
 		}
 
 		FSlateBrush Result;
-		FLinearColor BaseTint;
-
 		if (!IsUnsetBrush(NormalBrush))
 		{
 			Result = NormalBrush;
-			BaseTint = NormalBrush.TintColor.GetSpecifiedColor();
+			Result.TintColor = FSlateColor(NormalBrush.TintColor.GetSpecifiedColor() * InheritTint);
 		}
 		else
 		{
+			// Unset brush = plain solid fill of the whole button.
 			Result.DrawAs = ESlateBrushDrawType::Image;
-			Result.SetResourceObject(FScrollArrowDefaultTextures::Get().GetTexture(Direction));
-			BaseTint = StateBrush.TintColor.GetSpecifiedColor() * BuiltInArrowBaseTint;
+			Result.TintColor = FSlateColor(StateBrush.TintColor.GetSpecifiedColor() * DefaultSquareColor);
 		}
-
-		Result.TintColor = FSlateColor(BaseTint * StateTint);
 		return Result;
 	}
 }
@@ -76,7 +83,8 @@ void SScrollArrowBar::Construct(const FArguments& InArgs)
 
 	SAssignNew(ScrollBar, SScrollBar)
 		.Style(BarStyle)
-		.Orientation(Orientation);
+		.Orientation(Orientation)
+		.Padding(InArgs._ScrollBarPadding);
 
 	const TSharedRef<SWidget> StartWidget = MakeArrowButton(/*bIsEnd*/ false);
 	const TSharedRef<SWidget> EndWidget = MakeArrowButton(/*bIsEnd*/ true);
@@ -110,7 +118,7 @@ void SScrollArrowBar::Construct(const FArguments& InArgs)
 			+ SHorizontalBox::Slot().AutoWidth()[ EndWidget ];
 	}
 
-	// Background for the whole bar (only drawn if the user picked a brush).
+	// ChildSlot padding = sidebar padding (outside); the border inside it draws the sidebar background.
 	ChildSlot
 	[
 		SAssignNew(BackgroundBorder, SBorder)
@@ -139,7 +147,25 @@ EScrollArrowDirection SScrollArrowBar::GetDirection(bool bIsEnd) const
 TSharedRef<SWidget> SScrollArrowBar::MakeArrowButton(bool bIsEnd)
 {
 	TSharedPtr<SButton>& Button = bIsEnd ? EndButton : StartButton;
+	TSharedPtr<SImage>& Glyph = bIsEnd ? EndGlyph : StartGlyph;
 	FButtonStyle& SlateStyle = bIsEnd ? EndSlateStyle : StartSlateStyle;
+	FSlateBrush& ArrowBrush = bIsEnd ? EndArrowBrush : StartArrowBrush;
+
+	// Built-in arrow, drawn on top of the button square. Hidden (NoDrawType) when custom textures are used.
+	if (bIsEnd)
+	{
+		SAssignNew(Glyph, SImage)
+			.Image(&ArrowBrush)
+			.ColorAndOpacity(this, &SScrollArrowBar::GetEndArrowTint)
+			.Visibility(EVisibility::HitTestInvisible);
+	}
+	else
+	{
+		SAssignNew(Glyph, SImage)
+			.Image(&ArrowBrush)
+			.ColorAndOpacity(this, &SScrollArrowBar::GetStartArrowTint)
+			.Visibility(EVisibility::HitTestInvisible);
+	}
 
 	if (bIsEnd)
 	{
@@ -149,7 +175,10 @@ TSharedRef<SWidget> SScrollArrowBar::MakeArrowButton(bool bIsEnd)
 			.IsFocusable(false) // never steal keyboard / gamepad focus from the list
 			.IsEnabled(this, &SScrollArrowBar::IsEndEnabled)
 			.OnPressed(this, &SScrollArrowBar::HandleEndPressed)
-			.OnReleased(this, &SScrollArrowBar::HandleEndReleased);
+			.OnReleased(this, &SScrollArrowBar::HandleEndReleased)
+			[
+				Glyph.ToSharedRef()
+			];
 	}
 	else
 	{
@@ -159,7 +188,10 @@ TSharedRef<SWidget> SScrollArrowBar::MakeArrowButton(bool bIsEnd)
 			.IsFocusable(false)
 			.IsEnabled(this, &SScrollArrowBar::IsStartEnabled)
 			.OnPressed(this, &SScrollArrowBar::HandleStartPressed)
-			.OnReleased(this, &SScrollArrowBar::HandleStartReleased);
+			.OnReleased(this, &SScrollArrowBar::HandleStartReleased)
+			[
+				Glyph.ToSharedRef()
+			];
 	}
 
 	// Square button, sized by the scroll bar style thickness.
@@ -183,24 +215,44 @@ void SScrollArrowBar::SetSettings(const FScrollArrowBarSettings& InSettings)
 
 void SScrollArrowBar::ApplyStyles()
 {
-	ConfigureButton(StartButton, StartSlateStyle, Settings.StartButtonStyle, GetDirection(false));
-	ConfigureButton(EndButton, EndSlateStyle, Settings.EndButtonStyle, GetDirection(true));
+	ChildSlot.SetPadding(Settings.SideBarPadding);
+
+	ConfigureButton(StartButton, StartGlyph, StartSlateStyle, StartArrowBrush, Settings.StartButtonStyle, GetDirection(false));
+	ConfigureButton(EndButton, EndGlyph, EndSlateStyle, EndArrowBrush, Settings.EndButtonStyle, GetDirection(true));
+
+	if (BackgroundBorder.IsValid())
+	{
+		BackgroundBorder->Invalidate(EInvalidateWidgetReason::Paint);
+	}
 }
 
-void SScrollArrowBar::ConfigureButton(const TSharedPtr<SButton>& Button, FButtonStyle& SlateStyle,
-	const FScrollArrowButtonStyle& Style, EScrollArrowDirection Direction) const
+void SScrollArrowBar::ConfigureButton(const TSharedPtr<SButton>& Button, const TSharedPtr<SImage>& Glyph, FButtonStyle& SlateStyle,
+	FSlateBrush& ArrowBrush, const FScrollArrowButtonStyle& Style, EScrollArrowDirection Direction) const
 {
 	const FSlateBrush& Normal = Style.NormalImage;
 
 	SlateStyle
-		.SetNormal(ResolveBrush(Style.NormalImage, Normal, Direction, NormalStateTint))
-		.SetHovered(ResolveBrush(Style.HoveredImage, Normal, Direction, HoveredStateTint))
-		.SetPressed(ResolveBrush(Style.PressedImage, Normal, Direction, PressedStateTint))
-		.SetDisabled(ResolveBrush(Style.DisabledImage, Normal, Direction, DisabledStateTint))
+		.SetNormal(ResolveBackground(Style.NormalImage, Normal, DefaultNormalSquare, InheritNormalTint))
+		.SetHovered(ResolveBackground(Style.HoveredImage, Normal, DefaultHoveredSquare, InheritHoveredTint))
+		.SetPressed(ResolveBackground(Style.PressedImage, Normal, DefaultPressedSquare, InheritPressedTint))
+		.SetDisabled(ResolveBackground(Style.DisabledImage, Normal, DefaultDisabledSquare, InheritDisabledTint))
 		.SetNormalPadding(FMargin(0.0f))
 		.SetPressedPadding(FMargin(0.0f));
 
 	Button->SetButtonStyle(&SlateStyle);
+
+	// The built-in arrow is only shown when the user supplied no Normal texture (their art has its own arrow).
+	ArrowBrush = FSlateBrush();
+	if (IsUnsetBrush(Style.NormalImage))
+	{
+		ArrowBrush.DrawAs = ESlateBrushDrawType::Image;
+		ArrowBrush.SetResourceObject(FScrollArrowDefaultTextures::Get().GetTexture(Direction));
+	}
+	else
+	{
+		ArrowBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
+	}
+	Glyph->Invalidate(EInvalidateWidgetReason::Paint);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -210,6 +262,25 @@ void SScrollArrowBar::ConfigureButton(const TSharedPtr<SButton>& Button, FButton
 FOptionalSize SScrollArrowBar::GetBarThickness() const
 {
 	return FOptionalSize(BarStyle ? BarStyle->Thickness : 16.0f);
+}
+
+FSlateColor SScrollArrowBar::GetArrowTint(bool bIsEnd) const
+{
+	const TSharedPtr<SButton>& Button = bIsEnd ? EndButton : StartButton;
+
+	if (!Button.IsValid() || !Button->IsEnabled())
+	{
+		return FSlateColor(DefaultDisabledArrow);
+	}
+	if (Button->IsPressed())
+	{
+		return FSlateColor(DefaultPressedArrow);
+	}
+	if (Button->IsHovered())
+	{
+		return FSlateColor(DefaultHoveredArrow);
+	}
+	return FSlateColor(DefaultNormalArrow);
 }
 
 EVisibility SScrollArrowBar::GetBarVisibility() const

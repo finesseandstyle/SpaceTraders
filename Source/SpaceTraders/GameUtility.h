@@ -156,5 +156,7 @@ public:
 	
 	// Returns true if mouse is either hovering over UI OR actively clicking/holding a UI widget
 	UFUNCTION(BlueprintPure, Category = "UI")
-	static bool IsCursorOverUI();
+	static bool IsCursorOverUI();	
+	UFUNCTION(BlueprintPure, Category = "UI")
+	static FText FormatSequentialNamedText(const FText& Template, const TArray<FText>& Values);
 };
